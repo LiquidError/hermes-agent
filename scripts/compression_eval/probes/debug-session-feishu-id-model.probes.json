@@ -1,0 +1,72 @@
+{
+  "fixture": "debug-session-feishu-id-model",
+  "description": "Probes for the Feishu identity-model PR #8388 triage session. Anchors are the PR number, what the PR actually contained, what upstream docs confirmed, and the final decision + reasoning.",
+  "probes": [
+    {
+      "id": "recall-pr-number",
+      "type": "recall",
+      "question": "What is the PR number under review in this session, and what repository is it against?",
+      "expected_facts": ["PR #8388", "NousResearch/hermes-agent", "hermes-agent"]
+    },
+    {
+      "id": "recall-bug-claim",
+      "type": "recall",
+      "question": "What is the core bug the PR claims to fix? Be specific about the identifier involved.",
+      "expected_facts": ["open_id", "app-scoped", "not canonical", "Feishu identity model"]
+    },
+    {
+      "id": "recall-upstream-confirmation",
+      "type": "recall",
+      "question": "Do upstream Feishu/Lark docs confirm that open_id is app-scoped rather than a canonical cross-app identity?",
+      "expected_facts": ["yes", "confirmed", "open.feishu.cn", "same user has different Open IDs in different apps"]
+    },
+    {
+      "id": "artifact-pr-scope",
+      "type": "artifact",
+      "question": "Roughly how large is PR #8388, and which gateway subsystems does it touch beyond the Feishu adapter?",
+      "expected_facts": ["4647 lines", "gateway/run.py", "cron/scheduler.py", "gateway/config.py", "multi-account", "bind"]
+    },
+    {
+      "id": "artifact-new-tool",
+      "type": "artifact",
+      "question": "Does the PR add a new tool file? If so, what is its path?",
+      "expected_facts": ["tools/feishu_id_tool.py", "new file"]
+    },
+    {
+      "id": "decision-pr-assessment",
+      "type": "decision",
+      "question": "What is the reviewer's overall assessment of PR #8388 — approve, reject, or something more nuanced? Explain in one sentence.",
+      "expected_facts": [
+        "core claim is correct",
+        "scope is wrong",
+        "bait-and-switch",
+        "overbuilt",
+        "implement cleaner ourselves"
+      ]
+    },
+    {
+      "id": "decision-core-claim-validity",
+      "type": "decision",
+      "question": "Setting aside the PR's size, is the underlying identity-model concern technically valid or not?",
+      "expected_facts": ["technically valid", "correct", "open_id is app-scoped"]
+    },
+    {
+      "id": "continuation-next-action",
+      "type": "continuation",
+      "question": "Based on the review outcome, what is the next action the agent has been asked to take regarding this PR?",
+      "expected_facts": ["close the PR", "implement ourselves", "cleaner", "less complex"]
+    },
+    {
+      "id": "continuation-implementation-scope",
+      "type": "continuation",
+      "question": "If implementing the Feishu fix cleanly ourselves, which specific behaviour needs to change — what should replace the current use of open_id?",
+      "expected_facts": ["use union_id", "or user_id", "canonical identity", "cross-app stable ID"]
+    },
+    {
+      "id": "continuation-sources-to-reference",
+      "type": "continuation",
+      "question": "Which upstream documentation sources were fetched during review that should be referenced when writing the clean implementation?",
+      "expected_facts": ["open.feishu.cn", "open.larkoffice.com", "user-identity-introduction"]
+    }
+  ]
+}

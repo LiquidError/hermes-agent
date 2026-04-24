@@ -1,0 +1,74 @@
+{
+  "fixture": "feature-impl-context-priority",
+  "description": "Probes for the .hermes.md / AGENTS.md / CLAUDE.md / .cursorrules priority feature session. Anchors are the concrete facts the next assistant would need to continue: user's priority order, files modified, helper-function structure, live-test scenarios, and PR number.",
+  "probes": [
+    {
+      "id": "recall-priority-order",
+      "type": "recall",
+      "question": "What is the priority order the user asked for when multiple project-context files are present? List them from highest to lowest priority.",
+      "expected_facts": [".hermes.md", "AGENTS.md", "CLAUDE.md", ".cursorrules", "highest to lowest"]
+    },
+    {
+      "id": "recall-selection-mode",
+      "type": "recall",
+      "question": "When multiple context files exist in the same directory, does the agent now load all of them or pick only one?",
+      "expected_facts": ["only one", "priority-based selection", "highest-priority winner"]
+    },
+    {
+      "id": "artifact-files-modified",
+      "type": "artifact",
+      "question": "Which files in the hermes-agent repository were modified during this session? List them.",
+      "expected_facts": [
+        "agent/prompt_builder.py",
+        "tests/agent/test_prompt_builder.py"
+      ]
+    },
+    {
+      "id": "artifact-helper-functions",
+      "type": "artifact",
+      "question": "The session introduced separate helper functions for each context-file type. What are their names?",
+      "expected_facts": [
+        "_load_hermes_md",
+        "_load_agents_md",
+        "_load_claude_md",
+        "_load_cursorrules"
+      ]
+    },
+    {
+      "id": "artifact-test-scenarios",
+      "type": "artifact",
+      "question": "A scratch directory was created with scenario subdirectories to live-test the priority chain. Roughly how many scenarios, and what directory was it created under?",
+      "expected_facts": ["10 scenarios", "/tmp/context-priority-test"]
+    },
+    {
+      "id": "decision-claude-md-was-unsupported",
+      "type": "decision",
+      "question": "What was the finding about CLAUDE.md support in the existing loader before this session's changes?",
+      "expected_facts": ["CLAUDE.md was not handled", "not supported", "new handler added"]
+    },
+    {
+      "id": "decision-load-all-or-one",
+      "type": "decision",
+      "question": "Was the decision to load multiple context files when present, or to load only the highest-priority one? Explain the reasoning in one sentence.",
+      "expected_facts": ["load only one", "highest priority", "user preference", "do not want to load multiple"]
+    },
+    {
+      "id": "continuation-pr-number-and-status",
+      "type": "continuation",
+      "question": "A pull request was opened for this feature. What is the PR number and what is its merge status?",
+      "expected_facts": ["PR #2301", "merged", "squash"]
+    },
+    {
+      "id": "continuation-test-suite-result",
+      "type": "continuation",
+      "question": "What was the result of the full test suite run after the implementation changes?",
+      "expected_facts": ["5680 passed", "0 failures", "clean"]
+    },
+    {
+      "id": "continuation-next-step",
+      "type": "continuation",
+      "question": "If asked to pick up this session, what is the current state of main? Anything left to do?",
+      "expected_facts": ["merged to main", "main is current", "nothing outstanding", "pulled"]
+    }
+  ]
+}

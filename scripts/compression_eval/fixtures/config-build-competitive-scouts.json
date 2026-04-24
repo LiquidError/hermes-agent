@@ -1,0 +1,536 @@
+{
+  "name": "config-build-competitive-scouts",
+  "description": "~60-turn iterative config/build session: user wants a set of weekly cron jobs that scan competing AI coding agents (openclaw, nanoclaw, ironclaw, codex, opencode, claude-code, kilo-code, gemini-cli, cline, aider, roo) for merged PRs or web updates worth porting to hermes-agent. User adds one target per turn; agent creates each cron job and re-states the accumulated schedule. Exercises artifact trail (which jobs are configured, which days) and iterative state accumulation — the canonical case for iterative-merge summarization.",
+  "model": "anthropic/claude-sonnet-4.6",
+  "context_length": 200000,
+  "source": "~/.hermes/sessions/20260328_160817_77bd258b.jsonl",
+  "truncated_to": null,
+  "scrubbed_at": "2026-04-24T07:40:21Z",
+  "scrubbing_passes": [
+    "redact_sensitive_text (agent.redact)",
+    "username paths replaced with /home/user",
+    "personal handles (all case variants of the maintainer name) replaced with 'user'",
+    "email addresses replaced with contributor@example.com",
+    "git 'Author: Name <addr>' header lines normalised",
+    "reasoning scratchpad blocks stripped from assistant content",
+    "think tag blocks stripped from assistant content",
+    "messaging-platform user mentions replaced with <@user>",
+    "first user message paraphrased to remove personal voice",
+    "subsequent user messages kept verbatim (after above redactions)",
+    "system prompt replaced with generic public-safe placeholder",
+    "orphan empty-assistant messages and trailing tool messages dropped",
+    "tool outputs longer than 2000 chars truncated with a note"
+  ],
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful AI coding assistant with access to tools (terminal, file editing, search, web, etc.). You operate in a conversational loop: the user gives you a task, you call tools to accomplish it, and you report back concisely."
+    },
+    {
+      "role": "user",
+      "content": "Set up a cron job for the agent every Sunday to scan all PRs merged into openclaw that week, decide which are worth adding to hermes-agent, and open PRs porting those features."
+    },
+    {
+      "role": "assistant",
+      "content": "\n\nBefore I set this up, I want to make sure I have the right repo. Let me find \"openclaw\" on GitHub.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01XB5ckQ41b53VF6PpqgeoWD",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"openclaw github repository\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01TxqehehXyL5Y8SJWh8f4JC",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"openclaw AI agent github\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/openclaw\",\n        \"title\": \"OpenClaw - GitHub\",\n        \"description\": \"Your personal, open source AI assistant. openclaw has 23 repositories available. Follow their code on GitHub.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/openclaw/openclaw\",\n        \"title\": \"OpenClaw — Personal AI Assistant - GitHub\",\n        \"description\": \"Your own personal AI assistant. Any OS. Any Platform. The lobster way. - GitHub - openclaw/openclaw: Your own personal AI assistant.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/orgs/openclaw/repositories\",\n        \"title\": \"openclaw repositories - GitHub\",\n        \"description\": \"Your personal, open source AI assistant. openclaw has 23 repositories available. Follow their code on GitHub.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/Gen-Verse/OpenClaw-RL\",\n        \"title\": \"OpenClaw-RL: Train any agent simply by talking - GitHub\",\n        \"description\": \"OpenClaw-RL is a fully asynchronous reinforcement learning framework that turns everyday conversations into training signals for personalized AI ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://www.getopenclaw.ai/en/blog/openclaw-github\",\n        \"title\": \"OpenClaw GitHub: Source Code, Repositories & How to Contribute\",\n        \"description\": \"Connect OpenClaw to GitHub for AI-powered development workflows. Review PRs, manage issues, and automate code tasks with natural language. Guide ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01XB5ckQ41b53VF6PpqgeoWD"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/openclaw/openclaw\",\n        \"title\": \"OpenClaw — Personal AI Assistant - GitHub\",\n        \"description\": \"Agent to Agent (sessions_* tools). Use these to coordinate work across sessions without jumping between chat surfaces. sessions_list — discover ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/nearai/ironclaw\",\n        \"title\": \"IronClaw is OpenClaw inspired implementation in Rust ... - GitHub\",\n        \"description\": \"IronClaw is built on a simple principle: your AI assistant should work for you, not against you. In a world where AI systems are ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/SamurAIGPT/Best-AI-Agents/blob/main/README.md\",\n        \"title\": \"awesome-openclaw/README.md at main - GitHub\",\n        \"description\": \"OpenClaw (formerly Moltbot, originally Clawdbot) is a free and open-source autonomous AI agent created by Peter Steinberger. It runs locally, connects to ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/snarktank/antfarm\",\n        \"title\": \"GitHub - snarktank/antfarm: Build your agent team in OpenClaw with ...\",\n        \"description\": \"Build your agent team in OpenClaw with one command. You don't need to hire a dev team. You need to define one. Antfarm gives you a team of specialized AI agents ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://www.youtube.com/watch?v=yBbLs3VAayc\",\n        \"title\": \"OpenClaw + GitHub: Building a Real AI Teammate - YouTube\",\n        \"description\": \"Learn how to turn OpenClaw into your very own autonomous AI developer agent! In this tutorial, we build directly on our previous Google ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01TxqehehXyL5Y8SJWh8f4JC"
+    },
+    {
+      "role": "assistant",
+      "content": "Found it - github.com/openclaw/openclaw, an open-source AI assistant. Let me look at the repo structure and recent PRs to craft a solid prompt for the cron job.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01MPkkocnPW2AXSzd13FoC4p",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{\"urls\": [\"https://github.com/openclaw/openclaw\"]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"results\": [\n    {\n      \"url\": \"https://github.com/openclaw/openclaw\",\n      \"title\": \"GitHub - openclaw/openclaw: Your own personal AI assistant. Any OS. Any Platform. The lobster way. 🦞 · GitHub\",\n      \"content\": \"# 🦞 OpenClaw — Personal AI Assistant\\n\\n**OpenClaw** is a personal AI assistant designed to run on your own devices, acting as a local-first control plane (Gateway) that connects to various messaging channels and hardware nodes. It is built for **Molty**, a \\\"space lobster\\\" AI assistant.\\n\\n- **Website:** [openclaw.ai](https://openclaw.ai/)\\n- **License:** MIT\\n- **GitHub Stats:** 339k Stars | 66.8k Forks | 1,364 Contributors\\n\\n---\\n\\n## 🚀 Quick Start & Installation\\n\\nOpenClaw requires **Node 24 (recommended)** or Node 22.16+.\\n\\n### Recommended CLI Setup\\nThe `onboard` command guides you through setting up the gateway, workspace, channels, and skills.\\n```bash\\nnpm install -g openclaw@latest\\n# or: pnpm add -g openclaw@latest\\n\\nopenclaw onboard --install-daemon\\n```\\n\\n### Basic Commands\\n```bash\\n# Start the gateway\\nopenclaw gateway --port 18789 --verbose\\n\\n# Send a direct message via CLI\\nopenclaw message send --to +1234567890 --message \\\"Hello from OpenClaw\\\"\\n\\n# Interact with the assistant\\nopenclaw agent --message \\\"Ship checklist\\\" --thinking high\\n```\\n\\n---\\n\\n## 🛠 Key Features & Subsystems\\n\\n### 1. Multi-Channel Inbox\\nOpenClaw supports an extensive list of messaging platforms:\\n*   **Mainstream:** WhatsApp, Telegram, Slack, Discord, Google Chat, Microsoft Teams.\\n*   **Privacy/Niche:** Signal, Matrix, iMessage (via BlueBubbles), Signal, IRC, Nostr.\\n*   **Regional/Specialized:** WeChat (via Tencent iLink plugin), Feishu, LINE, Zalo, Mattermost, Nextcloud Talk, Synology Chat, Tlon, Twitch.\\n\\n### 2. Hardware Nodes & Companion Apps\\n* \n\n[... tool output truncated for fixture — original was 4283 chars]",
+      "tool_call_id": "toolu_bdrk_01MPkkocnPW2AXSzd13FoC4p"
+    },
+    {
+      "role": "assistant",
+      "content": "Good, I have a clear picture of OpenClaw. It's a Node.js AI assistant with a lot of similar feature areas (multi-platform messaging, browser control, agent routing, etc.). Let me set up the cron job now.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01NVc5kbrRYuXwoYsydWkbQ4",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"openclaw-pr-scout\", \"schedule\": \"0 17 * * 0\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly OpenClaw PR Scout — scan merged PRs from openclaw/openclaw and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo openclaw/openclaw --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo openclaw/openclaw`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * New tool implementations or tool improvements\\n  * Gateway/messaging platform features (Telegram, Discord, Slack, WhatsApp, Signal, etc.)\\n  * Agent loop improvements (context management, prompt caching, compression)\\n  * CLI UX improvements\\n  * Security/safety features\\n  * Configuration system improvements\\n  * Cron/scheduling features\\n  * Browser automation improvements\\n  * Multi-agent coordination\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, Node.js/TypeScript-specific infra, dependency bumps, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b openclaw-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from openclaw/openclaw#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source OpenClaw PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in openclaw/openclaw this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"e6bfff604af4\",\n  \"name\": \"openclaw-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 0\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"e6bfff604af4\",\n    \"name\": \"openclaw-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly OpenClaw PR Scout \\u2014 scan merged PRs from openclaw/openclaw and port worthy features to hermes...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 0\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'openclaw-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01NVc5kbrRYuXwoYsydWkbQ4"
+    },
+    {
+      "role": "assistant",
+      "content": "All set. Here's what's running:\n\nopenclaw-pr-scout (e6bfff604af4)\n→ Every Sunday at 10 AM Pacific (5 PM UTC)\n→ Delivers results back to this Telegram chat\n→ hermes-agent-dev skill loaded for proper repo workflow\n\nWhat it does each week:\n① Pulls all merged PRs from openclaw/openclaw for the past 7 days via gh CLI\n② Reads diffs and evaluates each for relevance to hermes-agent (new tools, gateway features, agent loop improvements, CLI UX, security, etc.)\n③ Scores on impact, feasibility, and novelty — skips docs/deps/TS-specific stuff\n④ For worthy PRs, creates feature branches, implements the Python adaptation, runs tests, and opens draft PRs in hermes-agent referencing the source\n⑤ Sends you a summary report either way — what was reviewed, what was ported, what's worth watching\n\nFirst run is tomorrow (Sunday March 29). Want me to do a dry run now to see what this week's PRs look like?"
+    },
+    {
+      "role": "user",
+      "content": "Nah its fine. Can you make another one that scans nanoclaw and another that scans ironclaw etc"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01WNuuzg2HZkpBGFdZLtJpSU",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"nanoclaw github AI assistant\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01CNr4vkdFCdEQj4KmMPqzac",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"ironclaw github nearai AI assistant\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/qwibitai/nanoclaw\",\n        \"title\": \"GitHub - qwibitai/nanoclaw\",\n        \"description\": \"An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/hustcc/nano-claw\",\n        \"title\": \"hustcc/nano-claw - GitHub\",\n        \"description\": \"nano-claw is a TypeScript + Node.js implementation of nanobot, an ultra-lightweight personal AI assistant inspired by OpenClaw.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://www.reddit.com/r/selfhosted/comments/1r3p7s7/i_built_nanoclaw_a_lightweight_selfhosted_ai/\",\n        \"title\": \"I built NanoClaw - a lightweight self-hosted AI assistant with ... - Reddit\",\n        \"description\": \"I built NanoClaw - a lightweight self-hosted AI assistant with container isolation, WhatsApp integration, scheduled jobs, memory · Core is ~500 ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.youtube.com/watch?v=AQ5uiLyr8bQ\",\n        \"title\": \"The Lightweight, Secure AI Assistant OpenClaw Should Have Been\",\n        \"description\": \"... github.com/gavrielc/nanoclaw Cisco article - https ... NanoClaw: The Lightweight, Secure AI Assistant OpenClaw Should Have Been.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://virtuslab.com/blog/ai/nano-claw-your-personal-ai-butler/\",\n        \"title\": \"GitHub All-Stars #14: NanoClaw - VirtusLab\",\n        \"description\": \"We're looking at NanoClaw: a lightweight, container-isolated personal AI assistant that connects to popular messaging apps and runs on ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01WNuuzg2HZkpBGFdZLtJpSU"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/nearai/ironclaw\",\n        \"title\": \"IronClaw is OpenClaw inspired implementation in Rust ... - GitHub\",\n        \"description\": \"IronClaw defaults to NEAR AI but supports many LLM providers out of the box. Built-in providers include Anthropic, OpenAI, GitHub Copilot, ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/nearai/ironclaw/releases\",\n        \"title\": \"Releases · nearai/ironclaw - GitHub\",\n        \"description\": \"IronClaw is OpenClaw inspired implementation in Rust focused on privacy and security - Releases · nearai/ironclaw.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/nearai/ironclaw/issues\",\n        \"title\": \"Issues · nearai/ironclaw - GitHub\",\n        \"description\": \"IronClaw is OpenClaw inspired implementation in Rust focused on privacy and security - nearai/ironclaw.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/nearai/ironclaw/actions\",\n        \"title\": \"nearai/ironclaw · GitHub - Workflow runs\",\n        \"description\": \"IronClaw is OpenClaw inspired implementation in Rust focused on privacy and security - Workflow runs · nearai/ironclaw.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://www.mintlify.com/logicminds/ironclaw/index\",\n        \"title\": \"Your secure personal AI assistant - IronClaw - Mintlify\",\n        \"description\": \"With defense-in-depth security, local-first data storage, and self-expanding capabilities, IronClaw is the AI assistant you can actually trust.\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01CNr4vkdFCdEQj4KmMPqzac"
+    },
+    {
+      "role": "assistant",
+      "content": "Got them. nanoclaw (qwibitai/nanoclaw) is a lightweight container-isolated assistant, ironclaw (nearai/ironclaw) is a Rust rewrite focused on privacy/security. Creating both now.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01N5UJKWPPgQn1zEbH7nKmdr",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"nanoclaw-pr-scout\", \"schedule\": \"0 17 * * 0\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly NanoClaw PR Scout — scan merged PRs from qwibitai/nanoclaw and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo qwibitai/nanoclaw --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nNanoClaw is a lightweight, container-isolated AI assistant (TypeScript/Node.js). It has WhatsApp integration, scheduled jobs, memory, and focuses on security via container sandboxing.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo qwibitai/nanoclaw`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Container isolation / sandboxing patterns (hermes-agent has Docker/Singularity environments)\\n  * New tool implementations or tool improvements\\n  * Gateway/messaging platform features (Telegram, Discord, Slack, WhatsApp, Signal, etc.)\\n  * Agent loop improvements (context management, prompt caching, compression)\\n  * CLI UX improvements\\n  * Security/safety features — NanoClaw emphasizes this\\n  * Scheduling/cron features\\n  * Memory system improvements\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, TypeScript/Node.js-specific infra, dependency bumps, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b nanoclaw-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from qwibitai/nanoclaw#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source NanoClaw PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in qwibitai/nanoclaw this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01QW3UQvamZyJwMk4kF1PXXd",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"ironclaw-pr-scout\", \"schedule\": \"0 17 * * 0\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly IronClaw PR Scout — scan merged PRs from nearai/ironclaw and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo nearai/ironclaw --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nIronClaw is a Rust implementation of an OpenClaw-inspired AI assistant, focused on privacy and security. It supports NEAR AI, Anthropic, OpenAI, GitHub Copilot and other providers. Being Rust-native, it may have interesting approaches to performance, concurrency, and memory safety.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo nearai/ironclaw`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Privacy/security patterns — IronClaw's core differentiator\\n  * Provider integration improvements (multi-provider routing, fallback logic)\\n  * New tool implementations or tool improvements\\n  * Gateway/messaging platform features\\n  * Agent loop improvements (context management, streaming, concurrency patterns)\\n  * CLI UX improvements\\n  * Sandboxing / isolation approaches\\n  * Memory/session management\\n  * Performance optimizations that could translate to Python (algorithmic improvements, caching strategies)\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, Rust-specific infra (cargo, build system), dependency bumps, or low-level Rust optimizations with no conceptual equivalent in Python.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b ironclaw-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from nearai/ironclaw#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source IronClaw PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in nearai/ironclaw this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"34e4741dc587\",\n  \"name\": \"nanoclaw-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 0\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"34e4741dc587\",\n    \"name\": \"nanoclaw-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly NanoClaw PR Scout \\u2014 scan merged PRs from qwibitai/nanoclaw and port worthy features to hermes...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 0\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'nanoclaw-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01N5UJKWPPgQn1zEbH7nKmdr"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"379479d3c79a\",\n  \"name\": \"ironclaw-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 0\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"379479d3c79a\",\n    \"name\": \"ironclaw-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly IronClaw PR Scout \\u2014 scan merged PRs from nearai/ironclaw and port worthy features to hermes-a...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 0\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-29T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'ironclaw-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01QW3UQvamZyJwMk4kF1PXXd"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. All three scouts are live, all running Sundays at 10 AM Pacific:\n\n① openclaw-pr-scout — openclaw/openclaw (Node.js, 339k stars)\n② nanoclaw-pr-scout — qwibitai/nanoclaw (lightweight, container-isolated)\n③ ironclaw-pr-scout — nearai/ironclaw (Rust, privacy/security focused)\n\nEach one has hermes-agent-dev loaded, reports back here, and knows to adapt features to Python/hermes-agent conventions before opening PRs. First runs all fire tomorrow.\n\nYou mentioned \"etc\" — are there other OpenClaw-adjacent projects you want covered? I can spin up more of these in seconds."
+    },
+    {
+      "role": "user",
+      "content": "Then on tuesdays a job for doing this with openai codex repo"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01T8ugTLsuB9qY4rR1fEJ9Zt",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"openai codex github repository CLI agent 2025 2026\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/openai/codex\",\n        \"title\": \"openai/codex: Lightweight coding agent that runs in your terminal\",\n        \"description\": \"npm i -g @openai/codex or brew install --cask codex. Codex CLI is a coding agent from OpenAI that runs locally on your computer. Codex CLI splash.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://community.openai.com/t/how-to-set-up-git-and-github-cli-gh-for-codex-web-cloud/1371830\",\n        \"title\": \"How to set up git and GitHub CLI (gh) for Codex Web (Cloud)\",\n        \"description\": \"You need to add a GitHub token as a secret in your environment and change YOUR/REPO to your org/repo. Then Codex should be able to use both git ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.ai.cc/blogs/how-to-use-openai-codex-ai-coding-guide/\",\n        \"title\": \"How to Use OpenAI Codex: Complete AI Coding Agent Guide (2026)\",\n        \"description\": \"Introduced in a research preview in May 2025, Codex allows users to delegate coding tasks such as writing features, fixing bugs, answering ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://openai.com/index/introducing-codex/\",\n        \"title\": \"Introducing Codex - OpenAI\",\n        \"description\": \"Introducing Codex: a cloud-based software engineering agent that can work on many tasks in parallel, powered by codex-1.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://github.com/openai/codex/discussions/6109\",\n        \"title\": \"How can I create custom agents (e.g., Review, Test, Refactor) using ...\",\n        \"description\": \"I have been experimenting with the OpenAI Codex CLI, and I would like to build a setup similar to Claude Code, where I can define multiple specialized agents — ...\",\n        \"category\": \"github\"\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01T8ugTLsuB9qY4rR1fEJ9Zt"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_018ymLeBDrf9PGC1wf2Xt2Hv",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"codex-pr-scout\", \"schedule\": \"0 17 * * 2\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly OpenAI Codex PR Scout — scan merged PRs from openai/codex and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo openai/codex --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nOpenAI Codex is a lightweight coding agent CLI (TypeScript/Node.js) from OpenAI. It runs locally in the terminal, focuses on code generation/editing, has sandboxing, and supports multiple approval policies. Key areas of overlap with hermes-agent: terminal tool execution, file editing, sandboxing, agent loop design, CLI UX.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo openai/codex`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Terminal execution patterns (sandboxing, approval policies, command safety)\\n  * File editing / patching approaches\\n  * Agent loop improvements (context management, tool calling patterns, iteration control)\\n  * CLI UX innovations (spinners, output formatting, interactive modes)\\n  * Model routing / provider management\\n  * Code generation and editing strategies\\n  * Security/safety features (dangerous command detection, sandboxing)\\n  * Configuration system patterns\\n  * Multi-file editing workflows\\n  * Streaming / response handling\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, TypeScript/Node.js-specific infra, dependency bumps, npm/build tooling, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b codex-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from openai/codex#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source Codex PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in openai/codex this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"4f0c15608223\",\n  \"name\": \"codex-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 2\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-31T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"4f0c15608223\",\n    \"name\": \"codex-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly OpenAI Codex PR Scout \\u2014 scan merged PRs from openai/codex and port worthy features to hermes-...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 2\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-31T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'codex-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_018ymLeBDrf9PGC1wf2Xt2Hv"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. codex-pr-scout is live — Tuesdays at 10 AM Pacific, scanning openai/codex for terminal execution patterns, sandboxing, file editing workflows, CLI UX, and anything else worth pulling into hermes-agent.\n\nFull roster now:\n\n⚙ Sundays — openclaw, nanoclaw, ironclaw\n⚙ Tuesdays — openai codex\n\nAll reporting back here with summaries and draft PRs."
+    },
+    {
+      "role": "user",
+      "content": "Thursdays, opencode next"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_018HbV71r6ucSedapKxynQSr",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"opencode github CLI coding agent terminal\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://opencode.ai/\",\n        \"title\": \"OpenCode | The open source AI coding agent\",\n        \"description\": \"What is OpenCode? OpenCode is an open source agent that helps you write code in your terminal, IDE, or desktop. [*]. LSP enabled Automatically loads the ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://opencode.ai/docs/\",\n        \"title\": \"Intro | AI coding agent built for the terminal - OpenCode\",\n        \"description\": \"OpenCode is an open source AI coding agent. It's available as a terminal-based interface, desktop app, or IDE extension.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://opencode.ai/docs/cli/\",\n        \"title\": \"CLI | OpenCode\",\n        \"description\": \"OpenCode CLI options and commands ... Install the GitHub agent in your repository. Terminal window. opencode github install.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://github.com/anomalyco/opencode\",\n        \"title\": \"anomalyco/opencode: The open source coding agent. - GitHub\",\n        \"description\": \"OpenCode includes two built-in agents you can switch between with the Tab key. ... Also included is a general subagent for complex searches and multistep tasks.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://johnmaeda.medium.com/get-started-with-agent-skills-in-github-copilot-cli-and-opencode-cli-in-2026-on-macos-part-1-of-2-6627dfc25530\",\n        \"title\": \"Get Started with Agent Skills in GitHub Copilot CLI and OpenCode ...\",\n        \"description\": \"So I'll describe two routes you can take that are the best options to take when using GitHub Copilot CLI and OpenCode CLI in early 2026. Note: ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_018HbV71r6ucSedapKxynQSr"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_0164xxb1SbFiC4xvGeNjtBxS",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"opencode-pr-scout\", \"schedule\": \"0 17 * * 4\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly OpenCode PR Scout — scan merged PRs from anomalyco/opencode and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo anomalyco/opencode --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nOpenCode is an open-source AI coding agent (Go-based) from Anomaly. It runs in the terminal, as a desktop app, or IDE extension. Key features: LSP integration, built-in dual agents (switchable with Tab), subagent for complex searches, GitHub agent integration. Areas of overlap with hermes-agent: terminal-based coding workflows, file editing, agent loop design, subagent delegation, CLI/TUI UX.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo anomalyco/opencode`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * LSP integration patterns (code intelligence, diagnostics)\\n  * Multi-agent / subagent delegation approaches\\n  * Terminal UI innovations (TUI layout, keybindings, output formatting)\\n  * File editing / patching strategies\\n  * Agent loop improvements (context management, tool calling, iteration control)\\n  * IDE extension patterns (if applicable to hermes-agent's ACP adapter)\\n  * Provider routing / model switching\\n  * Session management\\n  * GitHub integration features\\n  * Streaming / response handling\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, Go-specific infra (go.mod, build tooling), dependency bumps, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b opencode-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from anomalyco/opencode#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source OpenCode PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in anomalyco/opencode this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"704b50e44ddd\",\n  \"name\": \"opencode-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 4\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-04-02T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"704b50e44ddd\",\n    \"name\": \"opencode-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly OpenCode PR Scout \\u2014 scan merged PRs from anomalyco/opencode and port worthy features to herme...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 4\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-04-02T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'opencode-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_0164xxb1SbFiC4xvGeNjtBxS"
+    },
+    {
+      "role": "assistant",
+      "content": "Live. anomalyco/opencode, Thursdays at 10 AM Pacific. That Go codebase has some interesting angles — LSP integration, dual-agent switching, and the TUI work could translate well.\n\nFull schedule:\n\n⚙ Sun — openclaw, nanoclaw, ironclaw\n⚙ Tue — openai codex\n⚙ Thu — opencode\n\nYou've got eyes on five competing agent projects now, all funneling into hermes-agent PRs."
+    },
+    {
+      "role": "user",
+      "content": "Then scan for claude code updates as well on fridays - they dont have an opensource repo, so we will need that one to scan the web for updates and implement prs without direct code references"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01MJjZ1qu45pewCmpS516YcD",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"claude-code-scout\", \"schedule\": \"0 17 * * 5\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Claude Code Feature Scout — scan the web for Claude Code updates and implement worthy features in hermes-agent.\\n\\nClaude Code is Anthropic's closed-source CLI coding agent. There is no public repo to scan PRs from, so this job relies on web research to discover new features, changes, and capabilities.\\n\\nSTEP 1: WEB RESEARCH\\nSearch broadly for Claude Code updates from the past week. Run multiple searches:\\n- \\\"Claude Code update\\\" (filter to past week)\\n- \\\"Claude Code new feature\\\"\\n- \\\"Claude Code changelog\\\"\\n- \\\"Anthropic Claude Code release\\\"\\n- \\\"Claude Code CLI\\\" site:anthropic.com\\n- \\\"Claude Code\\\" site:docs.anthropic.com\\n- \\\"Claude Code\\\" site:x.com (Twitter/X announcements)\\n- \\\"Claude Code\\\" site:reddit.com (community discoveries)\\n\\nAlso check these URLs directly for recent changes:\\n- https://docs.anthropic.com/en/docs/claude-code (official docs — look for new sections or changes)\\n- https://www.anthropic.com/blog (recent blog posts mentioning Claude Code)\\n- https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md (they may publish a changelog even without open-sourcing)\\n\\nCollect all findings: new features, UX changes, capability additions, workflow improvements, integration patterns, CLI flags, configuration options, hook systems, etc.\\n\\nSTEP 2: ANALYZE AND CATEGORIZE\\nFor each discovered update/feature, evaluate relevance to hermes-agent:\\n- Terminal execution patterns and sandboxing\\n- File editing approaches (diff display, multi-file editing)\\n- Context management (how they handle large codebases, file inclusion)\\n- Permission/approval models for dangerous operations\\n- CLI UX patterns (output formatting, progress display, interactive modes)\\n- Hook/plugin systems\\n- Git workflow integration\\n- Model routing and provider handling\\n- Session/conversation management\\n- MCP (Model Context Protocol) integration — Claude Code is a major MCP consumer\\n- Subagent/delegation patterns\\n- Cost tracking and token management\\n- IDE integration approaches (VS Code, JetBrains)\\n- Configuration system design\\n\\nSkip anything that's: Anthropic-model-specific (prompt caching details unique to Claude), marketing fluff with no technical substance, or features hermes-agent already has with equivalent or better implementation.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each feature on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: Can this be implemented without access to their source code?\\n- Novelty: Does hermes-agent already have this or something comparable?\\n- Clarity: Is the feature well-enough described to implement from documentation/descriptions alone?\\nOnly proceed with features scoring high across all four.\\n\\nSTEP 4: IMPLEMENT WORTHY FEATURES\\nFor each selected feature:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b claude-code-inspired/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Since there's no source code to reference, write clean implementations based on the documented behavior. Note in comments where the inspiration came from.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message: \\\"Inspired by Claude Code: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source material (blog post, docs page, tweet) where the feature was discovered\\n  * Explain the feature as Claude Code implements it\\n  * Describe how hermes-agent's implementation differs or adapts the concept\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all research and analysis is complete, provide a summary report:\\n- What sources were checked and what updates were found\\n- Which features were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Notable trends in Claude Code's development direction\\n- Features that weren't implemented but are worth watching for future consideration\\n\\nIf no features are worth implementing this week, deliver the summary report explaining what was found and why nothing qualified. Even a \\\"quiet week\\\" report is valuable for tracking Claude Code's trajectory.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"3d5a7b9a0844\",\n  \"name\": \"claude-code-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 5\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-04-03T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"3d5a7b9a0844\",\n    \"name\": \"claude-code-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Claude Code Feature Scout \\u2014 scan the web for Claude Code updates and implement worthy feature...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 5\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-04-03T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'claude-code-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01MJjZ1qu45pewCmpS516YcD"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. This one's a different beast — instead of scanning PRs it does broad web sweeps across Anthropic's blog, docs, X, Reddit, and changelogs, then reverse-engineers features worth porting from descriptions alone.\n\nFull weekly schedule:\n\n⚙ Sun — openclaw, nanoclaw, ironclaw (PR scan)\n⚙ Tue — openai codex (PR scan)\n⚙ Thu — opencode (PR scan)\n⚙ Fri — claude code (web intel scan)\n\nYou've basically got a competitive intelligence pipeline running against every major agent project, all feeding PRs into hermes-agent. Saturdays, Mondays, and Wednesdays are still open if you want to add more targets."
+    },
+    {
+      "role": "user",
+      "content": "Is kilo code open source?"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_018PRB7R7JNQbCDLBjcR2NxY",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Kilo Code open source github AI coding agent\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/kilo-org/kilocode\",\n        \"title\": \"GitHub - Kilo-Org/kilocode\",\n        \"description\": \"Kilo is the all-in-one agentic engineering platform. Build, ship, and iterate faster with the most popular open source coding agent. #1 coding agent on ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://kilo.ai/\",\n        \"title\": \"Kilo - Kilo: The Open Source AI Coding Agent for VS Code ...\",\n        \"description\": \"Build, ship, and iterate faster with Kilo, the most popular open source AI coding agent. Secure, local-first, 500+ models. Start faster today.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://github.com/kilo-org/kilo\",\n        \"title\": \"GitHub - Kilo-Org/kilo: Kilo is the all-in-one agentic engineering ...\",\n        \"description\": \"Kilo is the all-in-one agentic engineering platform. Build, ship, and iterate faster with the most popular open source coding agent.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/Kilo-Org\",\n        \"title\": \"Kilo Code - GitHub\",\n        \"description\": \"Kilo is the all-in-one agentic engineering platform. Build, ship, and iterate faster with the most popular open source coding agent. #1 coding agent on ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://kilo.ai/code\",\n        \"title\": \"Kilo: The Open Source AI Coding Agent for VS Code, JetBrains, and ...\",\n        \"description\": \"Build, ship, and iterate faster with Kilo, the most popular open source AI coding agent. Secure, local-first, 500+ models.\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_018PRB7R7JNQbCDLBjcR2NxY"
+    },
+    {
+      "role": "assistant",
+      "content": "Yep — fully open source at Kilo-Org/kilocode on GitHub. VS Code / JetBrains IDE extension, 500+ model support, claims to be the #1 coding agent on the marketplace. Want me to add it to the rotation?"
+    },
+    {
+      "role": "user",
+      "content": "Ok add kilo code for mondays"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01YH1BfSikNrQBMVTSZXu5zq",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"kilocode-pr-scout\", \"schedule\": \"0 17 * * 1\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Kilo Code PR Scout — scan merged PRs from Kilo-Org/kilocode and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo Kilo-Org/kilocode --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nKilo Code is an open-source AI coding agent that runs as a VS Code / JetBrains IDE extension. It supports 500+ models, is local-first, and focuses on agentic engineering workflows. Key areas of overlap with hermes-agent: multi-model support, file editing, code generation, tool use patterns, IDE integration (hermes-agent has an ACP adapter), and agent loop design.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo Kilo-Org/kilocode`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * IDE integration patterns (relevant to hermes-agent's ACP adapter for VS Code/Zed/JetBrains)\\n  * Multi-model provider routing and switching (500+ model support)\\n  * File editing / diff display / multi-file workflows\\n  * Agent loop improvements (context management, tool calling, iteration control)\\n  * Code intelligence features (diagnostics, LSP usage, codebase understanding)\\n  * Approval/permission models for code changes\\n  * Session and conversation management\\n  * MCP (Model Context Protocol) integration\\n  * Streaming and response handling\\n  * Cost tracking and token management\\n  * Configuration and customization patterns\\n  * Security/sandboxing approaches\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, TypeScript/VS Code extension-specific infra, dependency bumps, marketplace publishing, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b kilocode-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions (tool registration pattern, config system, slash commands, etc.).\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message referencing the source: \\\"Port from Kilo-Org/kilocode#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — in the PR body:\\n  * Link to the source Kilo Code PR\\n  * Explain what was ported and how it was adapted\\n  * Note any architectural differences in the implementation\\n  * Mark as draft if tests need more work\\n\\nSTEP 5: SUMMARY REPORT\\nAfter all analysis is complete, provide a summary report:\\n- Total PRs merged in Kilo-Org/kilocode this week\\n- How many were evaluated as potentially relevant\\n- How many PRs were opened in hermes-agent (with links)\\n- Brief notes on any interesting trends or features that weren't ported but are worth watching\\n\\nIf no PRs are worth porting this week, just deliver the summary report explaining what was reviewed and why nothing qualified.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"00bf3ec29397\",\n  \"name\": \"kilocode-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 1\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-30T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"00bf3ec29397\",\n    \"name\": \"kilocode-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Kilo Code PR Scout \\u2014 scan merged PRs from Kilo-Org/kilocode and port worthy features to herme...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 1\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-30T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'kilocode-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01YH1BfSikNrQBMVTSZXu5zq"
+    },
+    {
+      "role": "assistant",
+      "content": "Done. Updated schedule:\n\n⚙ Sun — openclaw, nanoclaw, ironclaw\n⚙ Mon — kilo code\n⚙ Tue — openai codex\n⚙ Thu — opencode\n⚙ Fri — claude code (web scan)\n\nWednesday and Saturday still open. You're covering the full spectrum now — IDE agents (kilo), terminal agents (codex, opencode), platform agents (openclaw, nanoclaw), systems-level (ironclaw), and closed-source (claude code)."
+    },
+    {
+      "role": "user",
+      "content": "We are only missing saturday? What other major agents are out there? Maybe check gemini cli? See whats popular on openrouter apps"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\nActually Wednesday is open too. Let me dig around.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01KmKwt78g3uPrSym3NDknHg",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Gemini CLI google open source github coding agent\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01KQuJru9zYQX4PytPezMStA",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"openrouter apps popular AI coding agents 2026\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_017GwNVRXF2e5nVVR8JfkQeA",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"top open source AI coding agents terminal CLI 2026\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/google-gemini/gemini-cli\",\n        \"title\": \"google-gemini/gemini-cli: An open-source AI agent that ... - GitHub\",\n        \"description\": \"Gemini CLI is an open-source AI agent that brings the power of Gemini directly into your terminal. It provides lightweight access to Gemini, giving you the ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://geminicli.com/\",\n        \"title\": \"Gemini CLI: Build, debug & deploy with AI\",\n        \"description\": \"Build debug & deploy with AI. Query and edit large codebases, generate apps from images or PDFs, and automate complex workflows—all from your terminal with ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://blog.google/innovation-and-ai/technology/developers-tools/introducing-gemini-cli-open-source-ai-agent/\",\n        \"title\": \"Google announces Gemini CLI: your open-source AI agent\",\n        \"description\": \"This open-source AI agent brings Gemini directly into your terminal for coding, problem-solving, and task management. You can access Gemini 2.5 ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.reddit.com/r/googlecloud/comments/1lk55a4/gemini_cli_your_opensource_ai_agent/\",\n        \"title\": \"Gemini CLI: your open-source AI agent : r/googlecloud - Reddit\",\n        \"description\": \"We are excited to announce the release of Gemini CLI , a command-line AI workflow tool that connects to your tools, understands your code ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://developers.google.com/gemini-code-assist/docs/gemini-cli\",\n        \"title\": \"Gemini CLI | Gemini Code Assist - Google for Developers\",\n        \"description\": \"The Gemini command line interface (CLI) is an open source AI agent that provides access to Gemini directly in your terminal.\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01KmKwt78g3uPrSym3NDknHg"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://openrouter.ai/apps\",\n        \"title\": \"App & Agent Rankings - OpenRouter\",\n        \"description\": \"Top Coding Agents · 1. Favicon for https://kilocode.ai/. Kilo Code. AI coding agent for VS Code · 2. Favicon for https://claude.ai/apple-touch-icon. Claude Code.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.teamday.ai/blog/top-ai-models-openrouter-2026\",\n        \"title\": \"Best AI Models for Chat & Agents: OpenRouter Ranked (March 2026)\",\n        \"description\": \"Ranked: best OpenRouter models in March 2026. GPT-5.4, Claude Sonnet 4.6, Gemini 3.1, DeepSeek V3.2, and top free models compared by quality ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://openrouter.ai/collections/programming\",\n        \"title\": \"Best AI Models for Coding - OpenRouter\",\n        \"description\": \"This collection features top coding models from Anthropic, Google, xAI, OpenAI and more, all accessible through a single API. From agentic coding workflows to ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.reddit.com/r/LocalLLaMA/comments/1r6g14s/4_of_the_top_5_most_used_models_on_openrouter/\",\n        \"title\": \"4 of the top 5 most used models on OpenRouter this week are Open ...\",\n        \"description\": \"If it's not open source people will just use the model directly from the source provider. I'm suprised seeing gemini on this list.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.robylon.ai/blog/leading-ai-coding-agents-of-2026\",\n        \"title\": \"12 Best AI Coding Agents in 2026 - #5 Will Surprise Most Devs\",\n        \"description\": \"The 12 Best AI Coding Agents in 2026 include Cursor, GitHub Copilot, Windsurf, and Bolt.new, Lovable AI, v0 by Vercel, Zencoder, ...\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01KQuJru9zYQX4PytPezMStA"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://www.faros.ai/blog/best-ai-coding-agents-2026\",\n        \"title\": \"Best AI Coding Agents for 2026: Real-World Developer Reviews\",\n        \"description\": \"A developer-focused look at the best AI coding agents in 2026, comparing Claude Code, Cursor, Codex, Copilot, Cline, and more—with guidance ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.tembo.io/blog/coding-cli-tools-comparison\",\n        \"title\": \"The 2026 Guide to Coding CLI Tools: 15 AI Agents Compared\",\n        \"description\": \"A comprehensive comparison of 15 coding CLI tools—from Claude Code and Codex to Aider and Goose. We break down features, pricing, ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.reddit.com/r/AI_Agents/comments/1r4jtx8/what_are_the_best_cli_ai_agents_right_now_trying/\",\n        \"title\": \"What are the best CLI AI agents right now? Trying to replace Cursor ...\",\n        \"description\": \"The best tool so far has been Cursor CLI agents because they reliably work through tasks, resolve build and test problems, and keep iterating ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://blog.logrocket.com/tested-5-ai-cli-tools/\",\n        \"title\": \"I tested 5 AI CLI tools: Here's how they stack up - LogRocket Blog\",\n        \"description\": \"The Gemini CLI is a free, open-source AI agent that brings Gemini's capabilities right into your terminal. Let's quickly see how to set it up.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.mightybot.ai/blog/coding-ai-agents-for-accelerating-engineering-workflows\",\n        \"title\": \"Mighty Blog - 9 Best AI Coding Agents in 2026, Ranked - MightyBot\",\n        \"description\": \"The Top Coding AI Agents in 2026 · 1. Claude Code (Anthropic) — Best Overall AI Coding Agent · 2. Codex (OpenAI) — Best Cloud-Based Coding Agent.\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_017GwNVRXF2e5nVVR8JfkQeA"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01SujzQrcXJuZJbXMcfXh5KK",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{\"urls\": [\"https://openrouter.ai/apps\",\"https://www.tembo.io/blog/coding-cli-tools-comparison\"]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"results\": [\n    {\n      \"url\": \"https://openrouter.ai/apps\",\n      \"title\": \"App & Agent Rankings | OpenRouter\",\n      \"content\": \"# OpenRouter App & Agent Rankings Summary\\n\\nThis report summarizes the top-performing AI applications and agents integrated with OpenRouter, ranked by token usage and growth metrics.\\n\\n## 🏆 Top 4 Most Popular (All-Time)\\nThese are the largest public apps opting into usage tracking:\\n1.  **OpenClaw**: \\\"The AI that actually does things\\\" — **16T tokens**\\n2.  **Kilo Code**: AI coding agent for VS Code — **5.28T tokens**\\n3.  **Claude Code**: \\\"The AI for problem solvers\\\" — **1.99T tokens**\\n4.  **BLACKBOXAI**: AI agent for builders — **1.29T tokens**\\n\\n---\\n\\n## 📈 Trending (Fastest Growing This Week)\\n*   **Cinder Paper Replication**: +1964% (8.53B tokens)\\n*   **Ampere**: +547% (11.3B tokens)\\n*   **Cline**: +132% (489B tokens)\\n*   **Scripty**: +100% (9.23B tokens)\\n*   **Hermes Agent**: +97% (95.2B tokens)\\n\\n---\\n\\n## 📂 Category Rankings (by Token Usage)\\n\\n### 💻 Coding Agents\\n1.  **Kilo Code**: VS Code extension (259B tokens)\\n2.  **Claude Code**: Problem-solving agent (97.6B tokens)\\n3.  **Cline**: Autonomous IDE agent (81B tokens)\\n4.  **Hermes Agent**: CLI/Personal agent (15.8B tokens)\\n5.  **Roo Code**: Multi-agent dev team for editors (14.2B tokens)\\n\\n### 🚀 Productivity & Tools\\n1.  **OpenClaw**: Action-oriented AI (803B tokens)\\n2.  **Hermes Agent**: (15.8B tokens)\\n3.  **Open WebUI**: Extensible, self-hosted interface (4.41B tokens)\\n4.  **Gobii**: Always-on web browsing agents (3.64B tokens)\\n5.  **BuddyPro AI**: Knowledge-to-digital-twin builder (2.18B tokens)\\n\\n### 🎨 Creative & Media\\n1.  **Descript**: AI Video & Podcast Editor (40.6B tokens)\\n2.  **VidMuse**: Music video/shorts generator (3.63B tokens)\\n3.  **Novel\n\n[... tool output truncated for fixture — original was 8951 chars]",
+      "tool_call_id": "toolu_bdrk_01SujzQrcXJuZJbXMcfXh5KK"
+    },
+    {
+      "role": "assistant",
+      "content": "Here's what the landscape looks like. Gemini CLI is indeed open source (google-gemini/gemini-cli).\n\nOpenRouter coding agent rankings by token usage:\n\n① Kilo Code — 259B tokens (covered, Mon)\n② Claude Code — 97.6B tokens (covered, Fri)\n③ Cline — 81B tokens (open source, NOT covered)\n④ Hermes Agent — 15.8B tokens (that's us, trending +97%)\n⑤ Roo Code — 14.2B tokens (open source, NOT covered)\n\nPlus from the broader CLI comparison, notable open source agents we're missing:\n\n◆ Gemini CLI (google-gemini/gemini-cli) — 1M context window, generous free tier\n◆ Cline — #3 on OpenRouter, VS Code native, human-in-the-loop, browser automation\n◆ Roo Code — multi-agent dev team for editors\n◆ Aider — 39K stars, the open source pioneer, \"watch mode\" for IDE integration\n◆ Goose (Block) — Apache 2.0, heavy MCP integration\n◆ Crush (Charmbracelet) — broadest platform support, mid-session model switching\n\nYou've got Wednesday and Saturday open. Cline at 81B tokens is the obvious gap — it's the #3 coding agent on OpenRouter and we're not watching it. Gemini CLI is the other big one you mentioned.\n\nWant me to slot Gemini CLI on one day and Cline on the other? Or a different combo?"
+    },
+    {
+      "role": "user",
+      "content": "Make gemini cline aider and roo the final day we have open"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\nLet me grab the exact repos for all four first.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01GxYRwEUZJYRSUrq5w2Bxf1",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Cline github repository open source VS Code agent\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01DbZNVCCC37o5Es1ApLj7UT",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Aider github repository paul-gauthier coding agent\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_012UYs8u6UytVBLaXSXAARD4",
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "arguments": "{\"query\": \"Roo Code github repository open source multi-agent\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/cline/cline\",\n        \"title\": \"GitHub - cline/cline: Autonomous coding agent right in your IDE ...\",\n        \"description\": \"Autonomous coding agent right in your IDE, capable of creating/editing files, executing commands, using the browser, and more with your permission every ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://cline.bot/\",\n        \"title\": \"Cline - AI Coding, Open Source and Uncompromised\",\n        \"description\": \"Open-source AI coding agent with Plan/Act modes, MCP integration, and terminal-first workflows. Trusted by 5M+ developers worldwide.\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://github.com/cline\",\n        \"title\": \"Cline - GitHub\",\n        \"description\": \"Autonomous coding agent right in your IDE, capable of creating/editing files, executing commands, using the browser, and more with your permission every step ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/orgs/cline/repositories?type=all\",\n        \"title\": \"cline repositories - GitHub\",\n        \"description\": \"Autonomous coding agent right in your IDE, capable of creating/editing files, executing commands, using the browser, and more with your permission every ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/cline/cline/discussions/1007\",\n        \"title\": \"Multi-Agent Software Development with Cline #1007 - GitHub\",\n        \"description\": \"Implement a multi-agent system within Cline, inspired by the ChatDev paper, where specialized AI agents collaborate to simulate a software development company.\",\n        \"category\": \"github\"\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01GxYRwEUZJYRSUrq5w2Bxf1"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/aider-ai/aider\",\n        \"title\": \"GitHub - Aider-AI/aider: aider is AI pair programming in your terminal\",\n        \"description\": \"AI Pair Programming in Your Terminal. Aider lets you pair program with LLMs to start a new project or build on your existing codebase. aider screencast.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/lloydchang/Aider-AI-aider-fka-paul-gauthier-aider\",\n        \"title\": \"aider is AI pair programming in your terminal · GitHub\",\n        \"description\": \"Aider lets you pair program with LLMs, to edit code in your local git repository. Start a new project or work with an existing git repo.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/paul-gauthier/aider/issues/507\",\n        \"title\": \"Aider Researcher · Issue #507 - GitHub\",\n        \"description\": \"If Aider thinks that a task is non-trivial, it can run Google search, get all of the sites and rank them in terms of usability, how modern they are, and ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/paul-gauthier/aider/issues/669\",\n        \"title\": \"Multi Agent (Supervisor/Reviewer agent) · Issue #669 · Aider-AI/aider\",\n        \"description\": \"Aider is currently the top scoring agent on SWE Bench. So there's some reason to trust that it's current strategy is solid.\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://codesandbox.io/s/paul-gauthier-aider-lgsxg8\",\n        \"title\": \"paul-gauthier/aider - Codesandbox\",\n        \"description\": \"Aider is a command line tool that lets you pair program with GPT-3.5/GPT-4, to edit code stored in your local git repository.\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_01DbZNVCCC37o5Es1ApLj7UT"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"data\": {\n    \"web\": [\n      {\n        \"url\": \"https://github.com/RooCodeInc/Roo-Code\",\n        \"title\": \"Roo Code gives you a whole dev team of AI agents in your ... - GitHub\",\n        \"description\": \"What Can Roo Code Do For YOU? · Generate Code from natural language descriptions and specs · Adapt with Modes: Code, Architect, Ask, Debug, and Custom Modes ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/RooCodeInc\",\n        \"title\": \"Roo Code - GitHub\",\n        \"description\": \"Build databases, automations, apps & agents with AI — no code. Open source platform available on cloud and self-hosted. GDPR, HIPAA, SOC 2 compliant. Best ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://github.com/RooCodeInc/Roo-Code/issues/11929\",\n        \"title\": \"GNAP: git-native task board for Roo Code's multi-agent team ...\",\n        \"description\": \"GNAP proposes a fundamentally different coordination model: multiple independent Roo Code instances (possibly on different machines) ...\",\n        \"category\": \"github\"\n      },\n      {\n        \"url\": \"https://roocode.com/\",\n        \"title\": \"Roo Code – The AI dev team that gets things done\",\n        \"description\": \"Roo Code is open-source and fully customizable, letting you integrate any AI model you choose (e.g, OpenAI, Anthropic, local LLMs, etc.). It's built for multi- ...\",\n        \"category\": null\n      },\n      {\n        \"url\": \"https://www.reddit.com/r/RooCode/comments/1ioyp4j/proposal_roocode_community_github_repository_for/\",\n        \"title\": \"Roo-Code Community GitHub Repository for Sharing Setups ...\",\n        \"description\": \"A centralized place where we can share our setups and customizations for Roo-Code. A GitHub repository could be the perfect solution for this!\",\n        \"category\": null\n      }\n    ]\n  }\n}",
+      "tool_call_id": "toolu_bdrk_012UYs8u6UytVBLaXSXAARD4"
+    },
+    {
+      "role": "assistant",
+      "content": "Got all four repos. We've got Wednesday and Saturday open — I'll split them 2 and 2 to balance the load.",
+      "tool_calls": [
+        {
+          "id": "toolu_bdrk_01BeTjeQqS9Hxe8Y5qfXxKa4",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"gemini-cli-pr-scout\", \"schedule\": \"0 17 * * 3\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Gemini CLI PR Scout — scan merged PRs from google-gemini/gemini-cli and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo google-gemini/gemini-cli --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nGemini CLI is Google's open-source AI agent for the terminal (TypeScript/Node.js). Key differentiators: 1M token context window, Google Search grounding for fact-checking, generous free tier (60 RPM / 1000 RPD), built-in multimodal capabilities. Areas of overlap with hermes-agent: terminal agent workflow, tool execution, web search integration, context management, CLI UX.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo google-gemini/gemini-cli`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Large context management strategies (how they handle 1M token windows)\\n  * Search grounding / web integration patterns\\n  * Multimodal input handling (images, PDFs in terminal context)\\n  * Tool execution and sandboxing\\n  * Agent loop design (iteration, context compression, token budgets)\\n  * CLI UX innovations (output formatting, progress, interactive modes)\\n  * Configuration and extensibility patterns\\n  * MCP integration\\n  * Session and conversation management\\n  * Streaming and response handling\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, TypeScript/Node.js-specific infra, dependency bumps, Google Cloud-specific integrations, or clearly irrelevant to a Python codebase.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b gemini-cli-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions.\\n- The hermes-agent-dev skill is loaded — follow its workflow for making changes, running tests, and creating PRs.\\n- Run the relevant test subset to verify the implementation.\\n- Commit with a clear message: \\\"Port from google-gemini/gemini-cli#<number>: <description>\\\"\\n- Push and open a PR with `gh pr create` — link the source PR, explain the adaptation, mark as draft if needed.\\n\\nSTEP 5: SUMMARY REPORT\\nProvide a summary: total PRs merged, how many relevant, PRs opened in hermes-agent (with links), notable trends. If nothing worth porting, explain what was reviewed and why.\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01895kW4hoYBgXHAxQti6koD",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"cline-pr-scout\", \"schedule\": \"0 17 * * 3\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Cline PR Scout — scan merged PRs from cline/cline and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo cline/cline --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nCline is the #3 coding agent on OpenRouter (81B tokens). It's an autonomous VS Code extension with a human-in-the-loop philosophy — every file change requires explicit user approval. Key features: Plan/Act modes, MCP integration, browser automation (launching browsers and capturing screenshots), terminal-first workflows. 5M+ developers.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo cline/cline`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Plan/Act mode patterns (planning before executing — hermes-agent has similar concepts)\\n  * Browser automation approaches (relevant to hermes-agent's browser_tool)\\n  * Human-in-the-loop approval patterns (relevant to hermes-agent's approval.py)\\n  * MCP integration patterns (hermes-agent has mcp_tool.py)\\n  * File editing strategies and diff display\\n  * Context management and token budgets\\n  * Tool execution patterns\\n  * Multi-step task orchestration\\n  * Provider routing and model support\\n  * Screenshot/vision integration\\n  * Configuration and customization\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, VS Code extension API-specific, TypeScript infra, dependency bumps, or marketplace publishing.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b cline-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions.\\n- The hermes-agent-dev skill is loaded — follow its workflow.\\n- Run the relevant test subset to verify.\\n- Commit: \\\"Port from cline/cline#<number>: <description>\\\"\\n- Push and open a PR — link source, explain adaptation, draft if needed.\\n\\nSTEP 5: SUMMARY REPORT\\nProvide a summary: total PRs merged, how many relevant, PRs opened (with links), notable trends. If nothing worth porting, explain what was reviewed and why.\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_01CApeiwZyxpRiyA24aNfVSJ",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"aider-pr-scout\", \"schedule\": \"0 17 * * 6\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Aider PR Scout — scan merged PRs from Aider-AI/aider and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo Aider-AI/aider --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nAider is the open-source pioneer of AI pair programming in the terminal (Python). 39K+ GitHub stars, 15B tokens processed weekly. Key features: automatic git commits with sensible messages, \\\"watch mode\\\" for IDE integration, support for virtually every LLM (Claude, GPT, DeepSeek, local via Ollama), repo-map for codebase understanding, and battle-tested reliability. Being Python-based like hermes-agent, code patterns translate more directly.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo Aider-AI/aider`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Repo-map / codebase indexing strategies (understanding large codebases)\\n  * Git integration patterns (auto-commit, diff handling)\\n  * \\\"Watch mode\\\" and IDE integration approaches\\n  * Model support and provider routing (Aider supports many models)\\n  * Edit format strategies (whole file, diff, udiff, etc.)\\n  * Context management and token optimization\\n  * Agent loop and retry logic\\n  * CLI UX patterns\\n  * Streaming and response handling\\n  * Linting and code quality integration\\n  * Testing integration\\n  * Bug fixes — especially valuable since Aider is also Python\\n- Skip PRs that are: purely cosmetic/docs, CI/CD, dependency bumps, or benchmark-specific.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in hermes-agent's architecture? (Easier than usual since both are Python)\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b aider-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's architecture. Follow AGENTS.md conventions.\\n- The hermes-agent-dev skill is loaded — follow its workflow.\\n- Since both projects are Python, some patterns may translate almost directly — but always adapt to hermes-agent's conventions (tool registry, config system, etc.).\\n- Run the relevant test subset to verify.\\n- Commit: \\\"Port from Aider-AI/aider#<number>: <description>\\\"\\n- Push and open a PR — link source, explain adaptation, draft if needed.\\n\\nSTEP 5: SUMMARY REPORT\\nProvide a summary: total PRs merged, how many relevant, PRs opened (with links), notable trends. If nothing worth porting, explain what was reviewed and why.\"}"
+          }
+        },
+        {
+          "id": "toolu_bdrk_019omdXZNGsb4EqvxaFRzKSK",
+          "type": "function",
+          "function": {
+            "name": "cronjob",
+            "arguments": "{\"action\": \"create\", \"name\": \"roocode-pr-scout\", \"schedule\": \"0 17 * * 6\", \"deliver\": \"origin\", \"skill\": \"hermes-agent-dev\", \"prompt\": \"Weekly Roo Code PR Scout — scan merged PRs from RooCodeInc/Roo-Code and port worthy features to hermes-agent.\\n\\nSTEP 1: GATHER MERGED PRs FROM THE PAST WEEK\\n- Use `gh pr list --repo RooCodeInc/Roo-Code --state merged --search \\\"merged:>=$(date -d '7 days ago' +%Y-%m-%d)\\\" --limit 50 --json number,title,body,mergedAt,url,files,additions,deletions` to get all PRs merged in the last 7 days.\\n- If the date command fails, calculate the date manually (today minus 7 days) and use that.\\n\\nSTEP 2: ANALYZE EACH PR\\nRoo Code is an open-source multi-agent dev team for VS Code/editors (#5 coding agent on OpenRouter, 14.2B tokens). Key features: multiple agent modes (Code, Architect, Ask, Debug, Custom), multi-agent coordination, custom mode creation, and extensive model support. Forked from Cline originally but diverged significantly.\\n\\nFor each merged PR:\\n- Read the PR title, description, and changed files list.\\n- For promising PRs, read the full diff: `gh pr diff <number> --repo RooCodeInc/Roo-Code`\\n- Categorize relevance to hermes-agent. Focus on:\\n  * Multi-agent mode patterns (Code/Architect/Ask/Debug — hermes-agent has subagent delegation)\\n  * Custom mode/persona creation (relevant to hermes-agent's skin system and agent customization)\\n  * Agent coordination and handoff patterns\\n  * File editing and multi-file workflows\\n  * Context management strategies\\n  * MCP integration\\n  * Tool execution patterns\\n  * Provider routing and model switching\\n  * Session management\\n  * Memory and knowledge persistence\\n  * Browser automation\\n  * Configuration and extensibility\\n  * Bug fixes that might apply to similar patterns in hermes-agent\\n- Skip PRs that are: purely cosmetic/docs, VS Code extension API-specific, TypeScript infra, dependency bumps, or marketplace publishing.\\n\\nSTEP 3: SCORE AND SELECT\\nRate each relevant PR on:\\n- Impact: How useful would this be for hermes-agent users?\\n- Feasibility: How hard to implement in Python/hermes-agent's architecture?\\n- Novelty: Does hermes-agent already have this feature?\\nOnly proceed with PRs scoring high on all three.\\n\\nSTEP 4: IMPLEMENT WORTHY PRs\\nFor each selected PR:\\n- The hermes-agent repo is at ~/.hermes/hermes-agent. Work in the main repo directory.\\n- Create a feature branch: `git checkout -b roocode-port/<short-description> origin/main`\\n- Implement the feature adapted to hermes-agent's Python architecture. Follow AGENTS.md conventions.\\n- The hermes-agent-dev skill is loaded — follow its workflow.\\n- Run the relevant test subset to verify.\\n- Commit: \\\"Port from RooCodeInc/Roo-Code#<number>: <description>\\\"\\n- Push and open a PR — link source, explain adaptation, draft if needed.\\n\\nSTEP 5: SUMMARY REPORT\\nProvide a summary: total PRs merged, how many relevant, PRs opened (with links), notable trends. If nothing worth porting, explain what was reviewed and why.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"16de93694a6c\",\n  \"name\": \"gemini-cli-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 3\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-04-01T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"16de93694a6c\",\n    \"name\": \"gemini-cli-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Gemini CLI PR Scout \\u2014 scan merged PRs from google-gemini/gemini-cli and port worthy features ...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 3\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-04-01T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'gemini-cli-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01BeTjeQqS9Hxe8Y5qfXxKa4"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"92f1dabc9169\",\n  \"name\": \"cline-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 3\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-04-01T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"92f1dabc9169\",\n    \"name\": \"cline-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Cline PR Scout \\u2014 scan merged PRs from cline/cline and port worthy features to hermes-agent.\\n\\n...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 3\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-04-01T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'cline-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01895kW4hoYBgXHAxQti6koD"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"a477e19d9ded\",\n  \"name\": \"aider-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 6\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-28T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"a477e19d9ded\",\n    \"name\": \"aider-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Aider PR Scout \\u2014 scan merged PRs from Aider-AI/aider and port worthy features to hermes-agent...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 6\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-28T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'aider-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_01CApeiwZyxpRiyA24aNfVSJ"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"success\": true,\n  \"job_id\": \"b9eac48dc7a1\",\n  \"name\": \"roocode-pr-scout\",\n  \"skill\": \"hermes-agent-dev\",\n  \"skills\": [\n    \"hermes-agent-dev\"\n  ],\n  \"schedule\": \"0 17 * * 6\",\n  \"repeat\": \"forever\",\n  \"deliver\": \"origin\",\n  \"next_run_at\": \"2026-03-28T17:00:00-07:00\",\n  \"job\": {\n    \"job_id\": \"b9eac48dc7a1\",\n    \"name\": \"roocode-pr-scout\",\n    \"skill\": \"hermes-agent-dev\",\n    \"skills\": [\n      \"hermes-agent-dev\"\n    ],\n    \"prompt_preview\": \"Weekly Roo Code PR Scout \\u2014 scan merged PRs from RooCodeInc/Roo-Code and port worthy features to herm...\",\n    \"model\": null,\n    \"provider\": null,\n    \"base_url\": null,\n    \"schedule\": \"0 17 * * 6\",\n    \"repeat\": \"forever\",\n    \"deliver\": \"origin\",\n    \"next_run_at\": \"2026-03-28T17:00:00-07:00\",\n    \"last_run_at\": null,\n    \"last_status\": null,\n    \"enabled\": true,\n    \"state\": \"scheduled\",\n    \"paused_at\": null,\n    \"paused_reason\": null\n  },\n  \"message\": \"Cron job 'roocode-pr-scout' created.\"\n}",
+      "tool_call_id": "toolu_bdrk_019omdXZNGsb4EqvxaFRzKSK"
+    },
+    {
+      "role": "assistant",
+      "content": "Full week is loaded. Split the four across the two open days:\n\nComplete schedule, all at 10 AM Pacific:\n\n⚙ Sun — openclaw, nanoclaw, ironclaw\n⚙ Mon — kilo code\n⚙ Tue — openai codex\n⚙ Wed — gemini cli, cline\n⚙ Thu — opencode\n⚙ Fri — claude code (web scan)\n⚙ Sat — aider, roo code\n\n10 scouts across 7 days, covering every major agent project in the space. Aider is especially interesting since it's also Python — ports from that one should be the cleanest. Cline at 81B tokens on OpenRouter is the one I'd watch closest for high-impact features.\n\nAider and Roo Code first runs are tonight actually (Saturday), so you'll get reports from those two within a few hours."
+    }
+  ]
+}

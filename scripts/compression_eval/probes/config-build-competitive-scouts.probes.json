@@ -1,0 +1,96 @@
+{
+  "fixture": "config-build-competitive-scouts",
+  "description": "Probes for the competitive-scout cron-job setup session. Anchors are which agents were configured, which day of the week each runs, and the full final schedule. This fixture most directly tests artifact-trail and iterative-merge because the job list grows by one per user turn.",
+  "probes": [
+    {
+      "id": "recall-first-repo",
+      "type": "recall",
+      "question": "What was the first repository the user asked to create a scout cron for, and on what day of the week?",
+      "expected_facts": ["openclaw", "Sunday"]
+    },
+    {
+      "id": "recall-closed-source-target",
+      "type": "recall",
+      "question": "One of the scout targets does not have an open-source repository and had to be configured as a web scan instead. Which one, and on what day?",
+      "expected_facts": ["claude code", "Friday", "web scan"]
+    },
+    {
+      "id": "artifact-all-jobs",
+      "type": "artifact",
+      "question": "List every scout cron job created in this session.",
+      "expected_facts": [
+        "openclaw-pr-scout",
+        "nanoclaw-pr-scout",
+        "ironclaw-pr-scout",
+        "kilocode-pr-scout",
+        "codex-pr-scout",
+        "gemini-cli-pr-scout",
+        "cline-pr-scout",
+        "opencode-pr-scout",
+        "claude-code-scout",
+        "aider-pr-scout",
+        "roocode-pr-scout"
+      ]
+    },
+    {
+      "id": "artifact-final-schedule",
+      "type": "artifact",
+      "question": "What is the final weekly schedule? Give the day and the agents scanned on each day.",
+      "expected_facts": [
+        "Sun: openclaw, nanoclaw, ironclaw",
+        "Mon: kilo code",
+        "Tue: codex",
+        "Wed: gemini cli, cline",
+        "Thu: opencode",
+        "Fri: claude code",
+        "Sat: aider, roo"
+      ]
+    },
+    {
+      "id": "artifact-sunday-count",
+      "type": "artifact",
+      "question": "How many cron jobs run on Sunday?",
+      "expected_facts": ["3", "three", "openclaw, nanoclaw, ironclaw"]
+    },
+    {
+      "id": "artifact-total-count",
+      "type": "artifact",
+      "question": "How many scout cron jobs were created in total by the end of the session?",
+      "expected_facts": ["11", "eleven"]
+    },
+    {
+      "id": "decision-kilo-open-source",
+      "type": "decision",
+      "question": "The user asked whether Kilo Code is open source. What was the answer, and what did the user decide to do with it?",
+      "expected_facts": [
+        "yes, open source",
+        "Kilo-Org/kilocode",
+        "added as Monday scout"
+      ]
+    },
+    {
+      "id": "decision-saturday-fill",
+      "type": "decision",
+      "question": "Saturday was the last open day at one point. Which scout(s) were placed on Saturday, and why were those chosen?",
+      "expected_facts": ["aider", "roo", "filled in last based on openrouter popularity / cli comparison rankings"]
+    },
+    {
+      "id": "continuation-execution-time",
+      "type": "continuation",
+      "question": "At what local time of day do these scout cron jobs run?",
+      "expected_facts": ["10 AM Pacific", "17:00 UTC", "0 17 * * *"]
+    },
+    {
+      "id": "continuation-skill-used",
+      "type": "continuation",
+      "question": "Each scout job runs with a specific skill preloaded. Which one?",
+      "expected_facts": ["hermes-agent-dev"]
+    },
+    {
+      "id": "continuation-weekday-coverage",
+      "type": "continuation",
+      "question": "After the session ended, are there any weekdays still uncovered by a scout job?",
+      "expected_facts": ["no", "all 7 days covered", "full week loaded"]
+    }
+  ]
+}

@@ -52,6 +52,10 @@ ignored/
 .worktrees/
 environments/benchmarks/evals/
 
+# Compression eval run outputs (harness lives in scripts/compression_eval/)
+scripts/compression_eval/results/*
+!scripts/compression_eval/results/.gitkeep
+
 # Web UI build output
 hermes_cli/web_dist/
 
