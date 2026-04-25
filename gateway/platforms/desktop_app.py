@@ -1,18 +1,14 @@
 """DesktopAppAdapter — exposes the tui_gateway JSON-RPC dispatcher over WebSocket.
 
-This is the Mac-mini-side of the planned Tauri desktop chat. A single aiohttp
-web app accepts a WebSocket connection at ``/ws`` and hands it to
-``tui_gateway.ws.handle_ws`` — the same dispatcher the Hermes TUI uses,
-exposing all 60+ RPC methods (sessions, prompts, slash commands, approvals,
-voice, attachments, model switching) over the wire instead of stdio.
+A single aiohttp web app accepts a WebSocket connection at ``/ws`` and
+hands it to ``tui_gateway.ws.handle_ws`` — the same dispatcher the
+Hermes TUI uses, exposing the full RPC surface (sessions, prompts,
+slash commands, approvals, voice, attachments, model switching) over
+the wire instead of stdio.
 
-Phase 1 (this file): loopback bind only, no auth, single shared dispatcher.
-Phase 2 will add bearer-token auth at the WS handshake plus per-connection
-dispatcher isolation. Phase 3 will add ``attachment.upload`` and structured
-picker queries.
-
-See docs/architecture/integration-overview.md (planned for Phase 4) for the
-full protocol + cross-repo contract used by the Tauri client.
+Connections require a bearer token from ``hermes desktop pair`` once
+any client has been paired; loopback binds with an empty token store
+remain open for local development.
 """
 
 from __future__ import annotations
@@ -37,6 +33,7 @@ from gateway.platforms.base import (
     SendResult,
     is_network_accessible,
 )
+from gateway.platforms.desktop_app_auth import TokenStore
 from hermes_constants import get_hermes_home
 
 logger = logging.getLogger(__name__)
@@ -58,11 +55,8 @@ def _default_token_file() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# client.hello — registered into tui_gateway's dispatcher on first import.
-#
-# We add it idempotently so multiple imports / reloads don't double-register.
-# The handler returns the negotiated capabilities + protocol version; this is
-# the only "new" RPC method we add on top of the existing 60+ in tui_gateway.
+# client.hello — registered into tui_gateway's dispatcher. Idempotent so
+# multiple adapter instances or reloads don't double-register.
 # ---------------------------------------------------------------------------
 
 _HELLO_REGISTERED = False
@@ -97,9 +91,6 @@ def _register_client_hello() -> None:
         result = {
             "server_version": server_version,
             "protocol_version": PROTOCOL_VERSION,
-            # Server capabilities the desktop client can rely on. Phase 1 lists
-            # the dispatcher capabilities every TUI session has today; later
-            # phases extend this (e.g. "attachment.upload", "config.reveal_secret").
             "capabilities": [
                 "voice",
                 "tts",
@@ -124,9 +115,8 @@ def _register_client_hello() -> None:
 
 # ---------------------------------------------------------------------------
 # WebSocket shim — adapts aiohttp.WebSocketResponse to the starlette-style
-# interface tui_gateway.ws.handle_ws expects. Tiny: accept/send_text/
-# receive_text/close. Disconnect raises whatever WebSocketDisconnect class
-# tui_gateway.ws is currently watching for, so its loop terminates cleanly.
+# interface tui_gateway.ws.handle_ws expects (accept/send_text/receive_text/
+# close, with disconnect raising starlette's WebSocketDisconnect).
 # ---------------------------------------------------------------------------
 
 try:
@@ -137,6 +127,19 @@ except ImportError:
             super().__init__(f"ws disconnect code={code} reason={reason!r}")
             self.code = code
             self.reason = reason
+
+
+def _verify_bearer(request: "web.Request", tokens: TokenStore) -> Optional[str]:
+    """Extract `Authorization: Bearer <token>` and return the client
+    name on a hit, or None if missing/malformed/unknown/revoked.
+    """
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None
+    presented = header[len("Bearer ") :].strip()
+    if not presented:
+        return None
+    return tokens.verify(presented)
 
 
 class _AioHttpWsShim:
@@ -208,6 +211,7 @@ class DesktopAppAdapter(BasePlatformAdapter):
                 os.getenv("DESKTOP_APP_TOKEN_FILE", str(_default_token_file())),
             )
         )
+        self._tokens: TokenStore = TokenStore(self._token_file)
 
         self._app: Optional["web.Application"] = None
         self._runner: Optional["web.AppRunner"] = None
@@ -229,22 +233,21 @@ class DesktopAppAdapter(BasePlatformAdapter):
             logger.error("[%s] tui_gateway.ws unavailable: %s", self.platform.value, exc)
             return False
 
-        # Register the one new RPC method we own (idempotent).
         _register_client_hello()
 
-        # Phase-1 guard: refuse to start network-accessible without at least
-        # one paired client. Mirrors gateway/platforms/api_server.py:2602.
+        # Refuse to start network-accessible without at least one paired
+        # client. Mirrors gateway/platforms/api_server.py:2602.
         if is_network_accessible(self._host) and not self._has_any_token():
             logger.error(
                 "[%s] Refusing to start: binding to %s requires a paired client. "
-                "Run `hermes desktop pair --client-name <name>` (Phase 2) first, "
+                "Run `hermes desktop pair --client-name <name>` first, "
                 "or use the default 127.0.0.1.",
                 self.platform.value,
                 self._host,
             )
             return False
 
-        # Port-conflict probe — fail fast if 8645 is already in use.
+        # Port-conflict probe — fail fast if the port is already in use.
         try:
             with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
                 s.settimeout(1)
@@ -259,7 +262,19 @@ class DesktopAppAdapter(BasePlatformAdapter):
         except (ConnectionRefusedError, OSError):
             pass  # port is free
 
-        async def _ws_route(request: "web.Request") -> "web.WebSocketResponse":
+        async def _ws_route(request: "web.Request"):
+            # An empty store means no clients have been paired; the
+            # network-bind guard above forced loopback in that case, so
+            # leaving the gate open here is safe and lets local dev work
+            # without a token.
+            if not self._tokens.is_empty():
+                if _verify_bearer(request, self._tokens) is None:
+                    return web.Response(
+                        status=401,
+                        headers={"WWW-Authenticate": 'Bearer realm="hermes-desktop"'},
+                        text="unauthorized",
+                    )
+
             ws = web.WebSocketResponse(heartbeat=30.0)
             await ws.prepare(request)
             from tui_gateway.ws import handle_ws as _handle_ws
@@ -382,11 +397,5 @@ class DesktopAppAdapter(BasePlatformAdapter):
     # ------------------------------------------------------------------
 
     def _has_any_token(self) -> bool:
-        """Return True if the token file exists with non-empty content.
-
-        Phase 1 just checks existence + size; Phase 2 will parse and validate.
-        """
-        try:
-            return self._token_file.is_file() and self._token_file.stat().st_size > 2
-        except OSError:
-            return False
+        """Return True if the TokenStore has at least one paired client."""
+        return not self._tokens.is_empty()

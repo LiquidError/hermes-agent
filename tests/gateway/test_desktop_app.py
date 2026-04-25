@@ -1,13 +1,8 @@
-"""Phase 1 characterization tests for DesktopAppAdapter.
+"""Contract tests for DesktopAppAdapter.
 
-Phase 1 was shipped before the test-first discipline kicked in (see
-plans/desktop-app-adaptor.md, Part 5 "Testing discipline"). These tests
-retroactively pin its contracts so refactors and Phase 2's auth layer
-can't silently break them.
-
-Live verification (real port bind, real wscat round-trip) lives in the
-plan's "Verification" section; this file covers contracts that don't
-need a real socket.
+Covers behaviors that don't need a real socket: client.hello shape,
+the network-bind guard, the aiohttp ↔ tui_gateway shim, default
+config resolution, and get_chat_info.
 """
 
 from __future__ import annotations
@@ -56,9 +51,6 @@ def test_check_requirements_returns_false_without_aiohttp():
 
 class TestDefaults:
     def test_default_host_is_loopback(self):
-        # Phase 1 contract: default bind is loopback. A non-loopback bind
-        # requires an explicit override AND a paired-client token file
-        # (Phase 2 enforces).
         assert DEFAULT_HOST == "127.0.0.1"
 
     def test_default_port_is_8645(self):
@@ -68,14 +60,13 @@ class TestDefaults:
         assert WS_PATH == "/ws"
 
     def test_protocol_version_is_int(self):
-        # The Tauri client refuses to start against an incompatible server;
-        # bumping this is a deliberate, breaking act.
+        # Bumping this is a wire-breaking change for desktop clients.
         assert isinstance(PROTOCOL_VERSION, int)
         assert PROTOCOL_VERSION >= 1
 
-    def test_default_token_file_under_hermes_home(self):
-        # Profile-safe: token file MUST resolve under get_hermes_home(),
-        # not Path.home() / ".hermes".
+    def test_default_token_file_is_profile_safe(self):
+        # Must resolve under get_hermes_home(), not Path.home()/".hermes",
+        # so per-profile state stays isolated.
         token_file = _default_token_file()
         assert token_file.parent == Path(get_hermes_home())
         assert token_file.name == "desktop_app_tokens.json"
@@ -95,7 +86,6 @@ class TestClientHelloRegistration:
         _register_client_hello()
         second = tg_server._methods.get("client.hello")
 
-        # Same handler object — second register was a no-op.
         assert first is not None
         assert first is second
 
@@ -108,7 +98,7 @@ class TestClientHelloRegistration:
         resp = handler(
             42,
             {
-                "client_id": "tauri-tony-laptop",
+                "client_id": "tauri-test-client",
                 "client_version": "0.1.0",
                 "capabilities": ["voice.in", "voice.out"],
             },
@@ -121,14 +111,10 @@ class TestClientHelloRegistration:
         result = resp["result"]
         assert result["protocol_version"] == PROTOCOL_VERSION
         assert "server_version" in result
-        # Capabilities present and include the dispatcher methods every
-        # Phase-1 client can rely on.
         caps = result["capabilities"]
         for required in ("session.list", "slash.exec", "model.options", "approval"):
             assert required in caps, f"capabilities missing {required!r}"
-        # Echoes client metadata back so the Tauri side can detect a
-        # mismatched negotiation.
-        assert result["client_id"] == "tauri-tony-laptop"
+        assert result["client_id"] == "tauri-test-client"
         assert result["client_version"] == "0.1.0"
         assert result["client_capabilities"] == ["voice.in", "voice.out"]
 
@@ -179,7 +165,7 @@ class TestAdapterInit:
 
 
 # ---------------------------------------------------------------------------
-# Token file detection (Phase-1 stub; Phase 2 will parse + validate)
+# Token file detection — drives the network-bind guard.
 # ---------------------------------------------------------------------------
 
 
@@ -202,8 +188,8 @@ class TestHasAnyToken:
         assert adapter._has_any_token() is False
 
     def test_tiny_file_returns_false(self, tmp_path):
-        # Two-byte content (`[]`) is the canonical "no clients yet" file
-        # the pair CLI will write on first init; it shouldn't count.
+        # Empty JSON array is what the pair CLI writes before any client
+        # is added; it must not satisfy the bind guard.
         f = tmp_path / "tokens.json"
         f.write_text("[]")
         adapter = DesktopAppAdapter(
@@ -212,8 +198,12 @@ class TestHasAnyToken:
         assert adapter._has_any_token() is False
 
     def test_populated_file_returns_true(self, tmp_path):
+        from gateway.platforms.desktop_app_auth import TokenStore
+
         f = tmp_path / "tokens.json"
-        f.write_text('[{"name":"laptop","token":"sk-x"}]')
+        store = TokenStore(f)
+        store.add("client-a", "tok")
+        store.save()
         adapter = DesktopAppAdapter(
             PlatformConfig(enabled=True, extra={"token_file": str(f)}),
         )
@@ -286,8 +276,8 @@ class _FakeWs:
 
 @pytest.mark.asyncio
 async def test_shim_accept_is_noop():
-    # aiohttp prepares the WS at the route handler before the shim is
-    # built; accept() must therefore be a no-op for handle_ws's call site.
+    # aiohttp's route handler already called ws.prepare() before the
+    # shim is built, so accept() has nothing to do.
     shim = _AioHttpWsShim(_FakeWs([]))
     result = await shim.accept()
     assert result is None
@@ -322,15 +312,8 @@ async def test_shim_receive_text_skips_ping_pong_binary():
 
 @pytest.mark.asyncio
 async def test_shim_disconnect_raises_starlette_class():
-    # Critical: tui_gateway.ws.handle_ws does
-    #     except _WebSocketDisconnect:
-    # where _WebSocketDisconnect is starlette's class. Our shim's
-    # exception MUST be that same class (not a local fallback) so the
-    # catch fires and handle_ws exits cleanly. If starlette is ever
-    # uninstalled, the shim's local fallback would still raise, but the
-    # catch in handle_ws would also be a different class — and the loop
-    # would surface a tracebacks-and-crashes shape that this test pins
-    # against by requiring identity with starlette's class.
+    # handle_ws catches starlette.websockets.WebSocketDisconnect by
+    # identity; the shim must raise that exact class so the catch fires.
     from starlette.websockets import WebSocketDisconnect
 
     assert _WSDisc is WebSocketDisconnect

@@ -4473,6 +4473,13 @@ def cmd_webhook(args):
     webhook_command(args)
 
 
+def cmd_desktop(args):
+    """DesktopAppAdapter client pairing."""
+    from hermes_cli.desktop_app import desktop_command
+
+    return desktop_command(args)
+
+
 def cmd_hooks(args):
     """Shell-hook inspection and management."""
     from hermes_cli.hooks import hooks_command
@@ -7602,6 +7609,35 @@ For more help on a command:
     )
 
     webhook_parser.set_defaults(func=cmd_webhook)
+
+    # =========================================================================
+    # desktop command — pair/list/revoke clients for DesktopAppAdapter
+    # =========================================================================
+    desktop_parser = subparsers.add_parser(
+        "desktop",
+        help="Manage paired clients for the desktop chat adapter",
+        description=(
+            "Mint, list, and revoke bearer tokens for clients connecting "
+            "to DesktopAppAdapter. Tokens persist to "
+            "~/.hermes/desktop_app_tokens.json (only hashes are stored)."
+        ),
+    )
+    desktop_subparsers = desktop_parser.add_subparsers(dest="desktop_action")
+
+    dp_pair = desktop_subparsers.add_parser(
+        "pair", help="Mint a token for a new client; printed once, not recoverable"
+    )
+    dp_pair.add_argument("--client-name", dest="client_name", required=True,
+                         help="Friendly name (e.g. tony-laptop)")
+
+    desktop_subparsers.add_parser("list", aliases=["ls"], help="List paired client names")
+
+    dp_rm = desktop_subparsers.add_parser(
+        "revoke", aliases=["rm"], help="Remove a paired client by name"
+    )
+    dp_rm.add_argument("client_name", help="Client name to revoke")
+
+    desktop_parser.set_defaults(func=cmd_desktop)
 
     # =========================================================================
     # hooks command — shell-hook inspection and management
