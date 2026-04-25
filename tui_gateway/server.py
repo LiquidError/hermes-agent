@@ -114,10 +114,60 @@ except Exception:
 
 from tui_gateway.render import make_stream_renderer, render_diff, render_message
 
-_sessions: dict[str, dict] = {}
+class _DispatcherState:
+    """Per-connection runtime state. The TUI's stdio path uses a single
+    module-level instance; each WS connection owns its own to keep
+    in-flight sessions, pending RPC waits, and queued answers from
+    leaking across clients. The state.db-backed persistent session
+    store is unaffected.
+    """
+
+    def __init__(self) -> None:
+        self.sessions: dict[str, dict] = {}
+        self.pending: dict[str, tuple[str, threading.Event]] = {}
+        self.answers: dict[str, str] = {}
+
+
 _methods: dict[str, callable] = {}
-_pending: dict[str, tuple[str, threading.Event]] = {}
-_answers: dict[str, str] = {}
+_default_state = _DispatcherState()
+_state_var: contextvars.ContextVar["_DispatcherState"] = contextvars.ContextVar(
+    "tui_gateway_state", default=_default_state
+)
+
+
+def _state() -> "_DispatcherState":
+    return _state_var.get()
+
+
+# Maps every active session_id to its owning state. Lets background
+# threads (agent stream callbacks, slash workers) route events to the
+# right transport without inheriting the request's contextvar binding.
+_session_states: dict[str, "_DispatcherState"] = {}
+_session_states_lock = threading.Lock()
+
+
+def _register_session(sid: str) -> None:
+    with _session_states_lock:
+        _session_states[sid] = _state()
+
+
+def _unregister_session(sid: str) -> None:
+    with _session_states_lock:
+        _session_states.pop(sid, None)
+
+
+def _state_for_session(sid: str) -> "_DispatcherState":
+    with _session_states_lock:
+        return _session_states.get(sid) or _default_state
+
+
+# Module-level aliases — the stdio TUI never binds _state_var, so reads/
+# writes through these names always hit _default_state and behave exactly
+# as before. Code paths that may run under a per-connection binding use
+# ``_state().sessions`` / ``.pending`` / ``.answers`` instead.
+_sessions: dict[str, dict] = _default_state.sessions
+_pending: dict[str, tuple[str, threading.Event]] = _default_state.pending
+_answers: dict[str, str] = _default_state.answers
 _db = None
 _db_error: str | None = None
 _stdout_lock = threading.Lock()
@@ -252,7 +302,8 @@ class _SlashWorker:
 
 atexit.register(
     lambda: [
-        s.get("slash_worker") and s["slash_worker"].close() for s in _sessions.values()
+        s.get("slash_worker") and s["slash_worker"].close()
+        for s in _default_state.sessions.values()
     ]
 )
 
@@ -298,8 +349,10 @@ def write_json(obj: dict) -> bool:
     """
     if obj.get("method") == "event":
         sid = ((obj.get("params") or {}).get("session_id")) or ""
-        if sid and (t := (_sessions.get(sid) or {}).get("transport")) is not None:
-            return t.write(obj)
+        if sid:
+            owner = _state_for_session(sid)
+            if (t := (owner.sessions.get(sid) or {}).get("transport")) is not None:
+                return t.write(obj)
 
     return (current_transport() or _stdio_transport).write(obj)
 
@@ -416,7 +469,7 @@ def _wait_agent(session: dict, rid: str, timeout: float = 30.0) -> dict | None:
 
 
 def _sess_nowait(params, rid):
-    s = _sessions.get(params.get("session_id") or "")
+    s = _state().sessions.get(params.get("session_id") or "")
     return (s, None) if s else (None, _err(rid, 4001, "session not found"))
 
 
@@ -514,12 +567,12 @@ def _enable_gateway_prompts() -> None:
 def _block(event: str, sid: str, payload: dict, timeout: int = 300) -> str:
     rid = uuid.uuid4().hex[:8]
     ev = threading.Event()
-    _pending[rid] = (sid, ev)
+    _state().pending[rid] = (sid, ev)
     payload["request_id"] = rid
     _emit(event, sid, payload)
     ev.wait(timeout=timeout)
-    _pending.pop(rid, None)
-    return _answers.pop(rid, "")
+    _state().pending.pop(rid, None)
+    return _state().answers.pop(rid, "")
 
 
 def _clear_pending(sid: str | None = None) -> None:
@@ -531,9 +584,9 @@ def _clear_pending(sid: str | None = None) -> None:
     sessions sharing the same tui_gateway process.  When *sid* is
     None, every pending prompt is released (used during shutdown).
     """
-    for rid, (owner_sid, ev) in list(_pending.items()):
+    for rid, (owner_sid, ev) in list(_state().pending.items()):
         if sid is None or owner_sid == sid:
-            _answers[rid] = ""
+            _state().answers[rid] = ""
             ev.set()
 
 
@@ -650,7 +703,10 @@ def _load_enabled_toolsets() -> list[str] | None:
 
 
 def _session_tool_progress_mode(sid: str) -> str:
-    return str(_sessions.get(sid, {}).get("tool_progress_mode", "all") or "all")
+    return str(
+        _state_for_session(sid).sessions.get(sid, {}).get("tool_progress_mode", "all")
+        or "all"
+    )
 
 
 def _tool_progress_enabled(sid: str) -> bool:
@@ -962,7 +1018,7 @@ def _tool_summary(name: str, result: str, duration_s: float | None) -> str | Non
 
 
 def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
-    session = _sessions.get(sid)
+    session = _state().sessions.get(sid)
     if session is not None:
         try:
             from agent.display import capture_local_edit_snapshot
@@ -983,7 +1039,7 @@ def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
 
 def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result: str):
     payload = {"tool_id": tool_call_id, "name": name}
-    session = _sessions.get(sid)
+    session = _state().sessions.get(sid)
     snapshot = None
     started_at = None
     if session is not None:
@@ -1301,7 +1357,8 @@ def _make_agent(sid: str, key: str, session_id: str | None = None):
 
 
 def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
-    _sessions[sid] = {
+    state = _state()
+    state.sessions[sid] = {
         "agent": agent,
         "session_key": key,
         "history": history,
@@ -1320,13 +1377,14 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         # session (stdio for Ink, JSON-RPC WS for the dashboard sidebar).
         "transport": current_transport() or _stdio_transport,
     }
+    _register_session(sid)
     try:
-        _sessions[sid]["slash_worker"] = _SlashWorker(
+        state.sessions[sid]["slash_worker"] = _SlashWorker(
             key, getattr(agent, "model", _resolve_model())
         )
     except Exception:
         # Defer hard-failure to slash.exec; chat still works without slash worker.
-        _sessions[sid]["slash_worker"] = None
+        state.sessions[sid]["slash_worker"] = None
     try:
         from tools.approval import register_gateway_notify, load_permanent_allowlist
 
@@ -1443,8 +1501,9 @@ def _(rid, params: dict) -> dict:
     _enable_gateway_prompts()
 
     ready = threading.Event()
+    state = _state()
 
-    _sessions[sid] = {
+    state.sessions[sid] = {
         "agent": None,
         "agent_error": None,
         "agent_ready": ready,
@@ -1463,9 +1522,10 @@ def _(rid, params: dict) -> dict:
         "tool_started_at": {},
         "transport": current_transport() or _stdio_transport,
     }
+    _register_session(sid)
 
     def _build() -> None:
-        session = _sessions.get(sid)
+        session = state.sessions.get(sid)
         if session is None:
             # session.close ran before the build thread got scheduled.
             ready.set()
@@ -1530,11 +1590,11 @@ def _(rid, params: dict) -> dict:
             _emit("error", sid, {"message": f"agent init failed: {e}"})
         finally:
             # Orphan check: if session.close raced us and popped
-            # _sessions[sid] while we were building, the dict we just
-            # populated is unreachable.  Clean up the subprocess and
-            # the global notify registration ourselves — session.close
-            # couldn't see them at the time it ran.
-            if _sessions.get(sid) is not session:
+            # state.sessions[sid] while we were building, the dict we
+            # just populated is unreachable.  Clean up the subprocess
+            # and the global notify registration ourselves —
+            # session.close couldn't see them at the time it ran.
+            if state.sessions.get(sid) is not session:
                 if worker is not None:
                     try:
                         worker.close()
@@ -1784,7 +1844,8 @@ def _(rid, params: dict) -> dict:
 @method("session.close")
 def _(rid, params: dict) -> dict:
     sid = params.get("session_id", "")
-    session = _sessions.pop(sid, None)
+    session = _state().sessions.pop(sid, None)
+    _unregister_session(sid)
     if not session:
         return _ok(rid, {"closed": False})
     try:
@@ -2538,11 +2599,11 @@ def _(rid, params: dict) -> dict:
 
 def _respond(rid, params, key):
     r = params.get("request_id", "")
-    entry = _pending.get(r)
+    entry = _state().pending.get(r)
     if not entry:
         return _err(rid, 4009, f"no pending {key} request")
     _, ev = entry
-    _answers[r] = params.get(key, "")
+    _state().answers[r] = params.get(key, "")
     ev.set()
     return _ok(rid, {"status": "ok"})
 
@@ -2590,7 +2651,7 @@ def _(rid, params: dict) -> dict:
 @method("config.set")
 def _(rid, params: dict) -> dict:
     key, value = params.get("key", ""), params.get("value", "")
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
 
     if key == "model":
         try:
@@ -2974,7 +3035,7 @@ def _(rid, params: dict) -> dict:
 
 @method("reload.mcp")
 def _(rid, params: dict) -> dict:
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
     try:
         from tools.mcp_tool import shutdown_mcp_servers, discover_mcp_tools
 
@@ -3201,7 +3262,7 @@ def _(rid, params: dict) -> dict:
     resolved = _resolve_name(name)
     if resolved != name:
         name = resolved
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
 
     qcmds = _load_cfg().get("quick_commands", {})
     if name in qcmds:
@@ -3707,7 +3768,7 @@ def _(rid, params: dict) -> dict:
     try:
         from hermes_cli.model_switch import list_authenticated_providers
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         agent = session.get("agent") if session else None
         cfg = _load_cfg()
         current_provider = getattr(agent, "provider", "") or ""
@@ -4285,7 +4346,7 @@ def _(rid, params: dict) -> dict:
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             set(getattr(session["agent"], "enabled_toolsets", []) or [])
             if session
@@ -4316,7 +4377,7 @@ def _(rid, params: dict) -> dict:
     try:
         from model_tools import get_toolset_for_tool, get_tool_definitions
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             getattr(session["agent"], "enabled_toolsets", None)
             if session
@@ -4389,7 +4450,7 @@ def _(rid, params: dict) -> dict:
         )
         save_config(cfg)
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         info = (
             _reset_session_agent(params.get("session_id", ""), session)
             if session
@@ -4425,7 +4486,7 @@ def _(rid, params: dict) -> dict:
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             set(getattr(session["agent"], "enabled_toolsets", []) or [])
             if session

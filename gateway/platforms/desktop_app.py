@@ -275,9 +275,18 @@ class DesktopAppAdapter(BasePlatformAdapter):
                         text="unauthorized",
                     )
 
+            # Each WS connection gets its own dispatcher state so two
+            # paired clients can't see or interrupt each other's
+            # in-flight sessions. Persisted sessions in state.db remain
+            # shared across connections — that's the cross-platform
+            # continuity feature.
+            from tui_gateway import server as _tg
+            from tui_gateway.ws import handle_ws as _handle_ws
+
             ws = web.WebSocketResponse(heartbeat=30.0)
             await ws.prepare(request)
-            from tui_gateway.ws import handle_ws as _handle_ws
+            conn_state = _tg._DispatcherState()
+            state_token = _tg._state_var.set(conn_state)
 
             try:
                 await _handle_ws(_AioHttpWsShim(ws))
@@ -289,6 +298,17 @@ class DesktopAppAdapter(BasePlatformAdapter):
             except Exception as exc:
                 logger.exception("[%s] ws session crashed: %s", self.platform.value, exc)
             finally:
+                # Best-effort cleanup of any sessions left open on this
+                # connection — close slash workers and drop the global
+                # session→state registry entries.
+                for sid, sess in list(conn_state.sessions.items()):
+                    if (worker := sess.get("slash_worker")) is not None:
+                        try:
+                            worker.close()
+                        except Exception:
+                            pass
+                    _tg._unregister_session(sid)
+                _tg._state_var.reset(state_token)
                 if not ws.closed:
                     try:
                         await ws.close()
