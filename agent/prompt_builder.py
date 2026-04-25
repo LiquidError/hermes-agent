@@ -422,6 +422,16 @@ PLATFORM_HINTS = {
         "your response. Images are sent as native photos, and other files arrive as downloadable "
         "documents."
     ),
+    "desktop_app": (
+        "You are talking to your user through a desktop chat app — a native window on the "
+        "user's machine that speaks the same JSON-RPC dispatcher as the Hermes TUI. "
+        "Markdown is rendered fully (headings, bold, italic, lists, code blocks, tables, "
+        "links). Streaming deltas, tool-call timelines, approval prompts, voice in/out, "
+        "and image attachments are all first-class — the same UX surface as the TUI, with "
+        "richer rendering. Slash commands work via slash.exec; do not emit MEDIA:/path "
+        "tags here — the desktop client renders attachments through native pickers and "
+        "the agent's own tools, not via a delivery sidechannel."
+    ),
 }
 
 # ---------------------------------------------------------------------------

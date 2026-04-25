@@ -67,6 +67,7 @@ class Platform(Enum):
     WEIXIN = "weixin"
     BLUEBUBBLES = "bluebubbles"
     QQBOT = "qqbot"
+    DESKTOP_APP = "desktop_app"
 
 
 @dataclass
@@ -1073,6 +1074,25 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         api_server_model_name = os.getenv("API_SERVER_MODEL_NAME", "")
         if api_server_model_name:
             config.platforms[Platform.API_SERVER].extra["model_name"] = api_server_model_name
+
+    # Desktop App (full-feature Tauri client over tui_gateway WS)
+    desktop_app_enabled = os.getenv("DESKTOP_APP_ENABLED", "").lower() in ("true", "1", "yes")
+    desktop_app_host = os.getenv("DESKTOP_APP_HOST")
+    desktop_app_port = os.getenv("DESKTOP_APP_PORT")
+    desktop_app_token_file = os.getenv("DESKTOP_APP_TOKEN_FILE")
+    if desktop_app_enabled:
+        if Platform.DESKTOP_APP not in config.platforms:
+            config.platforms[Platform.DESKTOP_APP] = PlatformConfig()
+        config.platforms[Platform.DESKTOP_APP].enabled = True
+        if desktop_app_host:
+            config.platforms[Platform.DESKTOP_APP].extra["host"] = desktop_app_host
+        if desktop_app_port:
+            try:
+                config.platforms[Platform.DESKTOP_APP].extra["port"] = int(desktop_app_port)
+            except ValueError:
+                pass
+        if desktop_app_token_file:
+            config.platforms[Platform.DESKTOP_APP].extra["token_file"] = desktop_app_token_file
 
     # Webhook platform
     webhook_enabled = os.getenv("WEBHOOK_ENABLED", "").lower() in ("true", "1", "yes")
