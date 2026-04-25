@@ -365,6 +365,18 @@ class DesktopAppAdapter(BasePlatformAdapter):
             DesktopAppAdapter._SEND_WARNED = True
         return SendResult(success=False, message_id=None, error="send_not_supported_on_desktop_app")
 
+    async def get_chat_info(self, chat_id: str) -> dict:
+        """Minimal chat info — the desktop adapter has no per-chat metadata
+        (each WS connection is its own session), so we surface the bind
+        address for ``/platforms`` visibility.
+        """
+        return {
+            "name": "Desktop App",
+            "type": "desktop",
+            "host": self._host,
+            "port": self._port,
+        }
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
