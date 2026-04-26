@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -120,12 +121,17 @@ class _DispatcherState:
     in-flight sessions, pending RPC waits, and queued answers from
     leaking across clients. The state.db-backed persistent session
     store is unaffected.
+
+    ``redact_secrets`` is set by remote transports (DesktopAppAdapter)
+    so config dumps via ``config.get key="full"`` mask credential-shaped
+    values; the local TUI keeps verbatim access.
     """
 
     def __init__(self) -> None:
         self.sessions: dict[str, dict] = {}
         self.pending: dict[str, tuple[str, threading.Event]] = {}
         self.answers: dict[str, str] = {}
+        self.redact_secrets: bool = False
 
 
 _methods: dict[str, callable] = {}
@@ -159,6 +165,58 @@ def _unregister_session(sid: str) -> None:
 def _state_for_session(sid: str) -> "_DispatcherState":
     with _session_states_lock:
         return _session_states.get(sid) or _default_state
+
+
+# ── Secret redaction (used by remote transports) ──────────────────────
+
+_SECRET_KEY_PATTERN = re.compile(
+    r"(api[_-]?key|token|secret|password|credentials|bearer)$",
+    re.IGNORECASE,
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    return bool(_SECRET_KEY_PATTERN.search(key))
+
+
+def _mask_value(value):
+    if not isinstance(value, str):
+        return value
+    if len(value) < 12:
+        return "***"
+    return value[:4] + "..." + value[-4:]
+
+
+def _redact_dict(d: dict) -> dict:
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            out[k] = _redact_dict(v)
+        elif isinstance(k, str) and _is_secret_key(k):
+            out[k] = _mask_value(v)
+        else:
+            out[k] = v
+    return out
+
+
+# config.reveal_secret rate limiter — global window so an attacker can't
+# bypass it by cycling connections.
+_REVEAL_MAX_PER_WINDOW = 5
+_REVEAL_WINDOW_SECONDS = 30
+_reveal_timestamps: list[float] = []
+_reveal_lock = threading.Lock()
+
+
+def _reveal_check() -> bool:
+    """Return True if a reveal call is permitted under the rate limit."""
+    now = time.time()
+    cutoff = now - _REVEAL_WINDOW_SECONDS
+    with _reveal_lock:
+        _reveal_timestamps[:] = [t for t in _reveal_timestamps if t > cutoff]
+        if len(_reveal_timestamps) >= _REVEAL_MAX_PER_WINDOW:
+            return False
+        _reveal_timestamps.append(now)
+        return True
 
 
 # Module-level aliases — the stdio TUI never binds _state_var, so reads/
@@ -2904,6 +2962,29 @@ def _(rid, params: dict) -> dict:
     return _err(rid, 4002, f"unknown config key: {key}")
 
 
+@method("config.reveal_secret")
+def _(rid, params: dict) -> dict:
+    """Return the plaintext value of a single config key. Rate-limited
+    globally so an attacker can't bypass by cycling connections.
+    """
+    if not _reveal_check():
+        return _err(rid, 429, "too many reveal requests; try again shortly")
+
+    requested = params.get("key", "")
+    if not isinstance(requested, str) or not requested:
+        return _err(rid, 4001, "key required")
+
+    cfg = _load_cfg()
+    parts = requested.split(".")
+    cursor = cfg
+    for part in parts:
+        if isinstance(cursor, dict) and part in cursor:
+            cursor = cursor[part]
+        else:
+            return _err(rid, 4004, f"no such config key: {requested}")
+    return _ok(rid, {"key": requested, "value": cursor})
+
+
 @method("config.get")
 def _(rid, params: dict) -> dict:
     key = params.get("key", "")
@@ -2930,7 +3011,10 @@ def _(rid, params: dict) -> dict:
 
         return _ok(rid, {"home": str(_hermes_home), "display": display_hermes_home()})
     if key == "full":
-        return _ok(rid, {"config": _load_cfg()})
+        cfg = _load_cfg()
+        if _state().redact_secrets:
+            cfg = _redact_dict(cfg)
+        return _ok(rid, {"config": cfg})
     if key == "prompt":
         return _ok(rid, {"prompt": _load_cfg().get("custom_prompt", "")})
     if key == "skin":

@@ -286,6 +286,7 @@ class DesktopAppAdapter(BasePlatformAdapter):
             ws = web.WebSocketResponse(heartbeat=30.0)
             await ws.prepare(request)
             conn_state = _tg._DispatcherState()
+            conn_state.redact_secrets = True
             state_token = _tg._state_var.set(conn_state)
 
             try:
