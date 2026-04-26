@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import socket as _socket
+import ssl
 from pathlib import Path
 from typing import Any, Optional
 
@@ -103,6 +104,15 @@ def _register_client_hello() -> None:
                 "complete.slash",
                 "model.options",
                 "image.attach",
+                "attachment.upload",
+                "config.reveal_secret",
+                # Event types the client can subscribe to. The agent
+                # already emits these; listing them here lets the Tauri
+                # side pick the right ones for OS-notification triggers
+                # (e.g. approval.request when unfocused, message.complete
+                # when a long turn finishes off-screen).
+                "message.complete",
+                "tool.complete",
             ],
             "client_id": client_id,
             "client_version": client_version,
@@ -333,18 +343,23 @@ class DesktopAppAdapter(BasePlatformAdapter):
             self._app.router.add_get(WS_PATH, _ws_route)
             self._app.router.add_get("/health", _handle_health)
 
+            ssl_context = self._build_ssl_context()
             self._runner = web.AppRunner(self._app)
             await self._runner.setup()
-            self._site = web.TCPSite(self._runner, self._host, self._port)
+            self._site = web.TCPSite(
+                self._runner, self._host, self._port, ssl_context=ssl_context
+            )
             await self._site.start()
         except Exception as exc:
             logger.error("[%s] Failed to start: %s", self.platform.value, exc)
             return False
 
         self._mark_connected()
+        scheme = "wss" if ssl_context else "ws"
         logger.info(
-            "[%s] DesktopAppAdapter listening on ws://%s:%d%s",
+            "[%s] DesktopAppAdapter listening on %s://%s:%d%s",
             self.platform.value,
+            scheme,
             self._host,
             self._port,
             WS_PATH,
@@ -400,6 +415,27 @@ class DesktopAppAdapter(BasePlatformAdapter):
             )
             DesktopAppAdapter._SEND_WARNED = True
         return SendResult(success=False, message_id=None, error="send_not_supported_on_desktop_app")
+
+    def _build_ssl_context(self) -> Optional[ssl.SSLContext]:
+        """Build an SSL context from configured cert+key paths, or
+        return None when TLS is unconfigured. Raises ValueError when
+        only one half of the pair is supplied.
+        """
+        extra = self.config.extra or {}
+        tls = extra.get("tls") or {}
+        cert_file = tls.get("cert_file") or os.getenv("DESKTOP_APP_TLS_CERT")
+        key_file = tls.get("key_file") or os.getenv("DESKTOP_APP_TLS_KEY")
+
+        if not cert_file and not key_file:
+            return None
+        if cert_file and not key_file:
+            raise ValueError("desktop_app TLS: cert_file set without key_file")
+        if key_file and not cert_file:
+            raise ValueError("desktop_app TLS: key_file set without cert_file")
+
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.load_cert_chain(certfile=cert_file, keyfile=key_file)
+        return ctx
 
     async def get_chat_info(self, chat_id: str) -> dict:
         """Minimal chat info — the desktop adapter has no per-chat metadata

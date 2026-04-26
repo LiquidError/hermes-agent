@@ -1,4 +1,6 @@
 import atexit
+import base64
+import binascii
 import concurrent.futures
 import contextvars
 import copy
@@ -2515,6 +2517,61 @@ def _(rid, params: dict) -> dict:
         )
     except Exception as e:
         return _err(rid, 5027, str(e))
+
+
+# Default 25 MiB. Bigger files belong in a dedicated upload service, not
+# the JSON-RPC channel where every byte is base64.
+_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+
+
+@method("attachment.upload")
+def _(rid, params: dict) -> dict:
+    """Receive bytes from a remote client and persist them under
+    HERMES_HOME so the agent (which only reads from local disk) can
+    attach them like any other file. Mirrors ``image.attach`` but
+    accepts arbitrary content and raw bytes instead of a pre-existing
+    server path.
+    """
+    session, err = _sess(params, rid)
+    if err:
+        return err
+
+    filename = str(params.get("filename", "") or "").strip()
+    if not filename:
+        return _err(rid, 4001, "filename required")
+    # Reject anything that could escape the cache directory: separators,
+    # parent-dir traversal, NUL, leading dots that name the dir itself.
+    if any(c in filename for c in ("/", "\\", "\x00")) or ".." in filename or filename == ".":
+        return _err(rid, 4002, "filename must be a single basename")
+
+    raw = params.get("data", "")
+    if not isinstance(raw, str):
+        return _err(rid, 4003, "data must be a base64-encoded string")
+    try:
+        payload = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return _err(rid, 4003, "data must be base64-encoded")
+
+    if len(payload) > _ATTACHMENT_MAX_BYTES:
+        return _err(
+            rid,
+            4004,
+            f"size {len(payload)} exceeds {_ATTACHMENT_MAX_BYTES}-byte limit",
+        )
+
+    cache_dir = get_hermes_home() / "desktop_app_attachments"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / f"{uuid.uuid4().hex[:8]}_{filename}"
+    target.write_bytes(payload)
+
+    return _ok(
+        rid,
+        {
+            "path": str(target),
+            "filename": filename,
+            "size": len(payload),
+        },
+    )
 
 
 @method("input.detect_drop")

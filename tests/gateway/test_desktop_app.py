@@ -131,6 +131,24 @@ class TestClientHelloRegistration:
         assert resp["result"]["client_version"] == "unknown"
         assert resp["result"]["client_capabilities"] == []
 
+    def test_advertises_attachment_redaction_and_event_methods(self):
+        # The Tauri client introspects this list to decide which RPC
+        # methods + event types it can rely on. Adding capabilities is
+        # safe; removing one is a wire-protocol break.
+        from tui_gateway import server as tg_server
+
+        _register_client_hello()
+        handler = tg_server._methods["client.hello"]
+        caps = handler(1, {})["result"]["capabilities"]
+
+        for required in (
+            "attachment.upload",
+            "config.reveal_secret",
+            "message.complete",
+            "tool.complete",
+        ):
+            assert required in caps, f"capabilities missing {required!r}"
+
 
 # ---------------------------------------------------------------------------
 # DesktopAppAdapter init — config / env / defaults
