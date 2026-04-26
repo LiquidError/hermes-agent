@@ -278,11 +278,23 @@ class DesktopAppAdapter(BasePlatformAdapter):
             # leaving the gate open here is safe and lets local dev work
             # without a token.
             if not self._tokens.is_empty():
-                if _verify_bearer(request, self._tokens) is None:
+                client_name = _verify_bearer(request, self._tokens)
+                if client_name is None:
                     return web.Response(
                         status=401,
                         headers={"WWW-Authenticate": 'Bearer realm="hermes-desktop"'},
                         text="unauthorized",
+                    )
+                self._tokens.touch(client_name)
+                try:
+                    self._tokens.save()
+                except OSError as exc:
+                    # Persisting last-seen is best-effort — a read-only
+                    # token file shouldn't block authenticated traffic.
+                    logger.warning(
+                        "[%s] could not persist last_seen_at: %s",
+                        self.platform.value,
+                        exc,
                     )
 
             # Each WS connection gets its own dispatcher state so two
@@ -328,6 +340,9 @@ class DesktopAppAdapter(BasePlatformAdapter):
             return ws
 
         async def _handle_health(_request: "web.Request") -> "web.Response":
+            # Reload from disk so external `hermes desktop pair/revoke`
+            # operations are reflected without restarting the gateway.
+            tokens = TokenStore(self._token_file)
             return web.json_response(
                 {
                     "platform": self.platform.value,
@@ -335,6 +350,10 @@ class DesktopAppAdapter(BasePlatformAdapter):
                     "protocol_version": PROTOCOL_VERSION,
                     "host": self._host,
                     "port": self._port,
+                    "paired_clients": [
+                        {"name": r.name, "last_seen_at": r.last_seen_at}
+                        for r in tokens.list()
+                    ],
                 }
             )
 

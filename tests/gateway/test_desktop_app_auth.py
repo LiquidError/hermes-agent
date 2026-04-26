@@ -126,6 +126,67 @@ class TestTokenStore:
         # didn't accidentally remove a different client
         assert store.verify("tok1") == "client-a"
 
+    def test_new_record_has_no_last_seen(self, tmp_path):
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add("client-a", "tok1")
+        rec = store.list()[0]
+        assert rec.last_seen_at is None
+
+    def test_touch_records_timestamp(self, tmp_path):
+        import time
+
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add("client-a", "tok1")
+
+        before = time.time()
+        store.touch("client-a")
+        after = time.time()
+
+        rec = store.list()[0]
+        assert rec.last_seen_at is not None
+        assert before <= rec.last_seen_at <= after
+
+    def test_touch_unknown_client_is_noop(self, tmp_path):
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add("client-a", "tok1")
+        # No exception, no mutation to other records.
+        store.touch("not-a-client")
+        rec = store.list()[0]
+        assert rec.last_seen_at is None
+
+    def test_last_seen_persists_across_reload(self, tmp_path):
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        path = tmp_path / "tokens.json"
+        first = TokenStore(path)
+        first.add("client-a", "tok1")
+        first.touch("client-a")
+        first.save()
+
+        rec = TokenStore(path).list()[0]
+        assert rec.last_seen_at is not None
+
+    def test_loads_legacy_records_without_last_seen(self, tmp_path):
+        # Token files written before this field existed must still load.
+        import json
+
+        path = tmp_path / "tokens.json"
+        path.write_text(
+            json.dumps([{"name": "client-a", "token_hash": "abc" * 22}])
+        )
+
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        rec = TokenStore(path).list()[0]
+        assert rec.name == "client-a"
+        assert rec.last_seen_at is None
+
 
 # ---------------------------------------------------------------------------
 # WS handshake bearer-token middleware
@@ -176,6 +237,28 @@ class TestHandshake:
                 ready = json.loads(await ws.receive_str())
                 assert ready.get("method") == "event"
                 assert ready["params"]["type"] == "gateway.ready"
+
+    @pytest.mark.asyncio
+    async def test_successful_auth_persists_last_seen(self, auth_adapter, tmp_path):
+        # Reading the on-disk file directly verifies the touch was persisted,
+        # not just held in the adapter's in-memory store.
+        import json
+        import time
+
+        port = auth_adapter
+        before = time.time()
+        async with ClientSession() as s:
+            async with s.ws_connect(
+                f"ws://127.0.0.1:{port}/ws",
+                headers={"Authorization": "Bearer valid-token"},
+            ):
+                pass
+        after = time.time()
+
+        on_disk = json.loads((tmp_path / "tokens.json").read_text())
+        record = next(r for r in on_disk if r["name"] == "client-a")
+        assert record["last_seen_at"] is not None
+        assert before <= record["last_seen_at"] <= after
 
     @pytest.mark.asyncio
     async def test_rejection_precedes_websocket_upgrade(self, auth_adapter):

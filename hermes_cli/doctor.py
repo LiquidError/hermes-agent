@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import shutil
+import time
 from pathlib import Path
 
 from hermes_cli.config import get_project_root, get_hermes_home, get_env_path
@@ -161,6 +162,58 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
         issues.append("Enable linger for the gateway user service: sudo loginctl enable-linger $USER")
     else:
         check_warn("Could not verify systemd linger", f"({linger_detail})")
+
+
+def _check_desktop_app_section() -> None:
+    """Surface DesktopAppAdapter status and paired clients."""
+    enabled = os.getenv("DESKTOP_APP_ENABLED", "").lower() in ("true", "1", "yes")
+    if not enabled:
+        return
+
+    print()
+    print(color("◆ Desktop App", Colors.CYAN, Colors.BOLD))
+
+    host = os.getenv("DESKTOP_APP_HOST", "127.0.0.1")
+    port = os.getenv("DESKTOP_APP_PORT", "8645")
+    check_ok(f"Adapter enabled", f"({host}:{port})")
+
+    try:
+        from gateway.platforms.desktop_app_auth import TokenStore
+        from hermes_constants import get_hermes_home
+
+        token_path = Path(
+            os.getenv(
+                "DESKTOP_APP_TOKEN_FILE",
+                str(get_hermes_home() / "desktop_app_tokens.json"),
+            )
+        )
+        records = TokenStore(token_path).list()
+    except Exception as exc:
+        check_warn("Could not read paired-clients file", f"({exc})")
+        return
+
+    if not records:
+        check_warn("No paired clients", "(run: hermes desktop pair --client-name <name>)")
+        return
+
+    check_ok(f"{len(records)} paired client(s)")
+    now = time.time()
+    for r in records:
+        if r.last_seen_at is None:
+            check_info(f"{r.name} — never connected")
+        else:
+            elapsed = max(0, int(now - r.last_seen_at))
+            check_info(f"{r.name} — last seen {_humanize_seconds(elapsed)} ago")
+
+
+def _humanize_seconds(s: int) -> str:
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        return f"{s // 3600}h"
+    return f"{s // 86400}d"
 
 
 def run_doctor(args):
@@ -1076,6 +1129,11 @@ def run_doctor(args):
     except Exception as e:
         check_warn("Could not check tool availability", f"({e})")
     
+    # =========================================================================
+    # Check: Desktop App adapter
+    # =========================================================================
+    _check_desktop_app_section()
+
     # =========================================================================
     # Check: Skills Hub
     # =========================================================================

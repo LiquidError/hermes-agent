@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -23,6 +24,7 @@ def _hash(token: str) -> str:
 class ClientRecord:
     name: str
     token_hash: str
+    last_seen_at: Optional[float] = None
 
 
 class TokenStore:
@@ -47,6 +49,14 @@ class TokenStore:
         self._records = [r for r in self._records if r.name != client_name]
         return len(self._records) != before
 
+    def touch(self, client_name: str) -> None:
+        """Mark *client_name* as just-seen. No-op for unknown names."""
+        now = time.time()
+        for rec in self._records:
+            if rec.name == client_name:
+                rec.last_seen_at = now
+                return
+
     def verify(self, token_plaintext: Optional[str]) -> Optional[str]:
         if not token_plaintext:
             return None
@@ -57,7 +67,14 @@ class TokenStore:
         return None
 
     def save(self) -> None:
-        payload = [{"name": r.name, "token_hash": r.token_hash} for r in self._records]
+        payload = [
+            {
+                "name": r.name,
+                "token_hash": r.token_hash,
+                "last_seen_at": r.last_seen_at,
+            }
+            for r in self._records
+        ]
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2))
@@ -77,5 +94,12 @@ class TokenStore:
                 continue
             name = item.get("name")
             token_hash = item.get("token_hash")
+            last_seen = item.get("last_seen_at")
             if isinstance(name, str) and isinstance(token_hash, str):
-                self._records.append(ClientRecord(name=name, token_hash=token_hash))
+                self._records.append(
+                    ClientRecord(
+                        name=name,
+                        token_hash=token_hash,
+                        last_seen_at=last_seen if isinstance(last_seen, (int, float)) else None,
+                    )
+                )
