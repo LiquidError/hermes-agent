@@ -171,6 +171,20 @@ class _AioHttpWsShim:
             msg = await self._ws.receive()
             if msg.type == web.WSMsgType.TEXT:
                 return msg.data
+            if msg.type == web.WSMsgType.BINARY:
+                # Wire protocol is JSON; some WS client libs auto-promote
+                # payloads to BINARY frames (Tauri's tauri-plugin-websocket
+                # does this on certain platforms). Decode and feed it to
+                # the dispatcher rather than silently dropping the frame —
+                # otherwise the client times out with no server-side log.
+                try:
+                    return msg.data.decode("utf-8")
+                except (UnicodeDecodeError, AttributeError):
+                    logger.warning(
+                        "[desktop_app] dropped non-utf8 BINARY frame (%d bytes)",
+                        len(msg.data) if isinstance(msg.data, (bytes, bytearray)) else -1,
+                    )
+                    continue
             if msg.type in (
                 web.WSMsgType.CLOSE,
                 web.WSMsgType.CLOSING,
@@ -179,7 +193,7 @@ class _AioHttpWsShim:
                 raise _WSDisc(code=1000, reason="client closed")
             if msg.type == web.WSMsgType.ERROR:
                 raise _WSDisc(code=1011, reason=str(self._ws.exception() or "ws error"))
-            # BINARY / PING / PONG — ignore, keep waiting.
+            # PING / PONG — ignore, keep waiting.
             continue
 
     async def close(self) -> None:

@@ -317,11 +317,38 @@ async def test_shim_receive_text_returns_text_payload():
 
 
 @pytest.mark.asyncio
-async def test_shim_receive_text_skips_ping_pong_binary():
+async def test_shim_receive_text_skips_ping_pong():
     fake = _FakeWs([
         WSMessage(type=WSMsgType.PING, data=b"", extra=""),
         WSMessage(type=WSMsgType.PONG, data=b"", extra=""),
-        WSMessage(type=WSMsgType.BINARY, data=b"\x00\x01", extra=""),
+        WSMessage(type=WSMsgType.TEXT, data="payload", extra=""),
+    ])
+    shim = _AioHttpWsShim(fake)
+    assert await shim.receive_text() == "payload"
+
+
+@pytest.mark.asyncio
+async def test_shim_receive_text_decodes_binary_as_utf8():
+    # Some WS client libraries auto-promote payloads to BINARY frames
+    # (e.g. Tauri's tauri-plugin-websocket on certain platforms). Our
+    # wire protocol is UTF-8 JSON either way, so accept BINARY too —
+    # otherwise the dispatcher silently never sees the message and the
+    # client times out with no server-side log.
+    payload = '{"jsonrpc":"2.0","id":1,"method":"attachment.upload"}'
+    fake = _FakeWs([
+        WSMessage(type=WSMsgType.BINARY, data=payload.encode("utf-8"), extra=""),
+    ])
+    shim = _AioHttpWsShim(fake)
+    assert await shim.receive_text() == payload
+
+
+@pytest.mark.asyncio
+async def test_shim_receive_text_skips_undecodable_binary():
+    # Garbage bytes shouldn't kill the receive loop; downstream JSON
+    # parse-error handling can still surface a -32700 if/when valid
+    # UTF-8 arrives. Skip and keep reading.
+    fake = _FakeWs([
+        WSMessage(type=WSMsgType.BINARY, data=b"\xff\xfe\xff", extra=""),
         WSMessage(type=WSMsgType.TEXT, data="payload", extra=""),
     ])
     shim = _AioHttpWsShim(fake)
