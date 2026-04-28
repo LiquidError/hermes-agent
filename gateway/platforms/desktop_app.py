@@ -237,9 +237,23 @@ class DesktopAppAdapter(BasePlatformAdapter):
         )
         self._tokens: TokenStore = TokenStore(self._token_file)
 
+        self._loop_probe_interval_ms: int = int(
+            extra.get(
+                "loop_probe_ms",
+                os.getenv("DESKTOP_APP_LOOP_PROBE_MS", "1000"),
+            )
+        )
+        self._loop_stall_warn_ms: int = int(
+            extra.get(
+                "loop_stall_warn_ms",
+                os.getenv("DESKTOP_APP_LOOP_STALL_MS", "2000"),
+            )
+        )
+
         self._app: Optional["web.Application"] = None
         self._runner: Optional["web.AppRunner"] = None
         self._site: Optional["web.TCPSite"] = None
+        self._loop_probe_task: Optional[asyncio.Task[None]] = None
 
     # ------------------------------------------------------------------
     # BasePlatformAdapter lifecycle
@@ -387,6 +401,15 @@ class DesktopAppAdapter(BasePlatformAdapter):
             logger.error("[%s] Failed to start: %s", self.platform.value, exc)
             return False
 
+        if self._loop_stall_warn_ms > 0 and self._loop_probe_interval_ms > 0:
+            self._loop_probe_task = asyncio.create_task(
+                self._loop_probe(
+                    self._loop_probe_interval_ms / 1000.0,
+                    self._loop_stall_warn_ms,
+                ),
+                name="desktop_app_loop_probe",
+            )
+
         self._mark_connected()
         scheme = "wss" if ssl_context else "ws"
         logger.info(
@@ -408,6 +431,13 @@ class DesktopAppAdapter(BasePlatformAdapter):
 
     async def disconnect(self) -> None:
         self._mark_disconnected()
+        if self._loop_probe_task is not None:
+            self._loop_probe_task.cancel()
+            try:
+                await self._loop_probe_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._loop_probe_task = None
         if self._site:
             try:
                 await self._site.stop()
@@ -419,6 +449,28 @@ class DesktopAppAdapter(BasePlatformAdapter):
             finally:
                 self._runner = None
         self._app = None
+
+    async def _loop_probe(self, interval_s: float, stall_ms: int) -> None:
+        # Sleeps interval_s, then measures how late the wakeup actually was.
+        # When the asyncio loop is blocked by sync work, this task can't run
+        # and the overshoot equals the block duration. Useful because the
+        # same blocked loop also can't service WS heartbeats or accept new
+        # connections — a stall here directly explains client disconnects
+        # and "connect timed out" failures.
+        loop = asyncio.get_running_loop()
+        while True:
+            scheduled = loop.time() + interval_s
+            try:
+                await asyncio.sleep(interval_s)
+            except asyncio.CancelledError:
+                return
+            overshoot_ms = int((loop.time() - scheduled) * 1000)
+            if overshoot_ms >= stall_ms:
+                logger.warning(
+                    "[%s] event loop stalled %dms past scheduled wakeup",
+                    self.platform.value,
+                    overshoot_ms,
+                )
 
     # ------------------------------------------------------------------
     # BasePlatformAdapter.send — unused on this adapter.
