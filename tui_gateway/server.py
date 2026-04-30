@@ -2888,9 +2888,116 @@ def _spawn_widget_api_call_worker(
     """Run the capability call as a prompt.btw and emit widget.api_response.
 
     Defined as a module-level function (not a closure) so tests can
-    monkey-patch it. Worker body lands in Task 5.
+    monkey-patch it.
     """
-    raise NotImplementedError
+    from tui_gateway.widget_constants import (
+        ERROR_API_CALL_EXPIRED,
+        ERROR_RESPONSE_TOO_LARGE,
+        ERROR_UNKNOWN_CAPABILITY,
+        HERMES_ASK_RESPONSE_CAP_BYTES,
+    )
+
+    state = _state()
+
+    def run():
+        session_tokens = []
+        try:
+            session_tokens = _set_session_context(session_key)
+            from run_agent import AIAgent
+
+            sess = state.sessions.get(sid) or {}
+            api_reg = sess.get("api_call_registry")
+            entry = api_reg.get(correlation_id) if api_reg is not None else None
+
+            if capability == "hermes.ask":
+                prompt = str(call_args.get("prompt", "") or "")
+                btw_agent = AIAgent(
+                    model=_resolve_model(),
+                    quiet_mode=True,
+                    platform="tui",
+                    max_iterations=8,
+                    enabled_toolsets=[],
+                )
+                # Capture the agent so Plan 04 can call agent.interrupt()
+                # for cancellation.
+                if api_reg is not None and entry is not None:
+                    entry.agent_ref = btw_agent
+                result = btw_agent.run_conversation(
+                    prompt, conversation_history=history_snapshot
+                )
+                answer = (
+                    result.get("final_response", str(result))
+                    if isinstance(result, dict)
+                    else str(result)
+                )
+                payload_result = {"answer": answer}
+            else:
+                _emit_api_response_error(
+                    sid,
+                    correlation_id,
+                    card_id,
+                    ERROR_UNKNOWN_CAPABILITY,
+                    f"unsupported capability {capability!r} reached worker",
+                )
+                if api_reg is not None:
+                    api_reg.complete(correlation_id)
+                return
+
+            # Cap enforcement — measure the serialized result before emitting.
+            serialized = json.dumps(payload_result, ensure_ascii=False)
+            actual = len(serialized.encode("utf-8"))
+            if actual > HERMES_ASK_RESPONSE_CAP_BYTES:
+                _emit_api_response_error(
+                    sid,
+                    correlation_id,
+                    card_id,
+                    ERROR_RESPONSE_TOO_LARGE,
+                    f"widget.api_response payload {actual} bytes exceeds cap of "
+                    f"{HERMES_ASK_RESPONSE_CAP_BYTES} bytes",
+                )
+            else:
+                _emit(
+                    "widget.api_response",
+                    sid,
+                    {
+                        "correlation_id": correlation_id,
+                        "card_id": card_id,
+                        "result": payload_result,
+                    },
+                )
+
+            if api_reg is not None:
+                api_reg.complete(correlation_id)
+        except Exception as exc:
+            _emit_api_response_error(
+                sid,
+                correlation_id,
+                card_id,
+                ERROR_API_CALL_EXPIRED,
+                f"widget.api_call worker error: {exc}",
+            )
+            late_sess = state.sessions.get(sid)
+            if late_sess is not None and late_sess.get("api_call_registry") is not None:
+                late_sess["api_call_registry"].complete(correlation_id)
+        finally:
+            if session_tokens:
+                _clear_session_context(session_tokens)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _emit_api_response_error(
+    sid: str, correlation_id: str, card_id: str, code: int, message: str
+) -> None:
+    _emit(
+        "widget.api_response",
+        sid,
+        {
+            "correlation_id": correlation_id,
+            "card_id": card_id,
+            "error": {"code": code, "message": message},
+        },
+    )
 
 
 # ── Methods: respond ─────────────────────────────────────────────────

@@ -116,3 +116,104 @@ def test_rejects_unsupported_capability(monkeypatch):
     # Either 4101 (unknown capability) or 4104 (not declared) is acceptable;
     # both are correct rejections. Use 4101 since the cap doesn't exist at all.
     assert resp["error"]["code"] in (4101, 4104)
+
+
+import json
+
+
+def test_worker_emits_api_response_on_success(monkeypatch):
+    sid, key, sess, cid = _seed_session_with_card(sid="sess-ws", key="key-ws")
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+
+    # Stub AIAgent.run_conversation to return a deterministic answer.
+    class _FakeAgent:
+        def __init__(self, *a, **kw):
+            self.session_id = kw.get("session_id", "")
+        def run_conversation(self, text, conversation_history=None):
+            return {"final_response": "Q3 revenue was $4.2M, up 18% YoY."}
+    monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
+
+    server._spawn_widget_api_call_worker(
+        sid=sid,
+        session_key=key,
+        correlation_id="corr_ok",
+        card_id=cid,
+        capability="hermes.ask",
+        call_args={"prompt": "What's Q3 revenue?"},
+        history_snapshot=[],
+    )
+
+    # Worker runs sync if we don't actually thread; but Plan 03 does
+    # spawn a thread. Wait briefly.
+    for _ in range(100):
+        if emits:
+            break
+        threading.Event().wait(0.02)
+
+    assert any(e[0] == "widget.api_response" for e in emits), f"no widget.api_response in {emits!r}"
+    resp = next(e for e in emits if e[0] == "widget.api_response")
+    assert resp[1] == sid
+    assert resp[2]["correlation_id"] == "corr_ok"
+    assert resp[2]["card_id"] == cid
+    assert resp[2]["result"]["answer"] == "Q3 revenue was $4.2M, up 18% YoY."
+    # Correlation popped from registry.
+    assert sess["api_call_registry"].get("corr_ok") is None
+
+
+def test_worker_emits_error_4106_when_response_exceeds_cap(monkeypatch):
+    sid, key, sess, cid = _seed_session_with_card(sid="sess-cap", key="key-cap")
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+
+    huge = "x" * (40 * 1024)  # 40 KiB > 32 KiB cap
+    class _FakeAgent:
+        def __init__(self, *a, **kw): pass
+        def run_conversation(self, text, conversation_history=None):
+            return {"final_response": huge}
+    monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
+
+    server._spawn_widget_api_call_worker(
+        sid=sid, session_key=key, correlation_id="corr_big",
+        card_id=cid, capability="hermes.ask", call_args={"prompt": "long"},
+        history_snapshot=[],
+    )
+    for _ in range(100):
+        if emits:
+            break
+        threading.Event().wait(0.02)
+
+    assert emits, "no widget.api_response emitted"
+    resp = next(e for e in emits if e[0] == "widget.api_response")
+    assert "error" in resp[2]
+    assert resp[2]["error"]["code"] == 4106
+    assert "32" in resp[2]["error"]["message"], "error should reference the 32 KiB cap"
+    # Actual size mentioned for diagnostics.
+    assert "40" in resp[2]["error"]["message"] or "actual" in resp[2]["error"]["message"].lower()
+
+
+def test_worker_handles_agent_exception(monkeypatch):
+    sid, key, sess, cid = _seed_session_with_card(sid="sess-exc", key="key-exc")
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+
+    class _FakeAgent:
+        def __init__(self, *a, **kw): pass
+        def run_conversation(self, text, conversation_history=None):
+            raise RuntimeError("agent blew up")
+    monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
+
+    server._spawn_widget_api_call_worker(
+        sid=sid, session_key=key, correlation_id="corr_err",
+        card_id=cid, capability="hermes.ask", call_args={"prompt": "x"},
+        history_snapshot=[],
+    )
+    for _ in range(100):
+        if emits:
+            break
+        threading.Event().wait(0.02)
+
+    resp = next(e for e in emits if e[0] == "widget.api_response")
+    assert "error" in resp[2]
+    # Use the cross-side ERROR_API_CALL_EXPIRED or a similar 5xxx code.
+    assert resp[2]["error"]["code"] >= 5000
