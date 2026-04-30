@@ -183,3 +183,47 @@ def test_widget_update_propagates_capabilities_when_provided(monkeypatch, sessio
         session_id=key,
     )
     assert reg.get(cid).capabilities == ["notes.save"]
+
+
+def test_widget_message_emits_and_returns_delivered(monkeypatch, session):
+    sid, key, sess = session
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="x", capabilities=[], title=None, initial_size=None, trace_id=None)
+
+    result = _call(
+        "widget_message",
+        {"card_id": cid, "payload": {"kind": "data.refresh", "rows": [1, 2, 3]}},
+        session_id=key,
+    )
+    assert result == {"delivered": True, "card_gone": False}
+    msg_emit = next(e for e in emits if e[0] == "widget.message")
+    assert msg_emit[1] == sid
+    assert msg_emit[2]["card_id"] == cid
+    assert msg_emit[2]["message"]["kind"] == "data.refresh"
+
+
+def test_widget_message_signals_card_gone(monkeypatch, session):
+    sid, key, _ = session
+    monkeypatch.setattr(server, "_emit", lambda *a: None)
+    result = _call(
+        "widget_message",
+        {"card_id": "wgt_deadbe", "payload": {"x": 1}},
+        session_id=key,
+    )
+    assert result == {"delivered": False, "card_gone": True}
+
+
+def test_widget_message_rejects_oversized_payload(monkeypatch, session):
+    sid, key, sess = session
+    monkeypatch.setattr(server, "_emit", lambda *a: None)
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="x", capabilities=[], title=None, initial_size=None, trace_id=None)
+    huge = {"data": "x" * (260 * 1024)}
+    result = _call(
+        "widget_message",
+        {"card_id": cid, "payload": huge},
+        session_id=key,
+    )
+    assert result["error"]["code"] == 4107

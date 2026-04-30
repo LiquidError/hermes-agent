@@ -322,6 +322,39 @@ def _widget_update(args: dict, **kwargs: Any) -> str:
 
 
 # --------------------------------------------------------------------------
+# widget_message
+# --------------------------------------------------------------------------
+
+
+def _widget_message(args: dict, **kwargs: Any) -> str:
+    session_key = kwargs.get("session_id", "") or ""
+    resolved = _resolve_session(session_key)
+    if resolved is None:
+        return _err(4001, "session not found")
+    sid, sess = resolved
+
+    card_id = args.get("card_id") or ""
+    payload = args.get("payload")
+    if payload is None:
+        return _err(4012, "payload required")
+    serialized = json.dumps(payload, ensure_ascii=False)
+    if len(serialized.encode("utf-8")) > MESSAGE_BYTE_CAP:
+        return _err(4107, f"widget.message payload exceeds {MESSAGE_BYTE_CAP} bytes")
+
+    reg: WidgetRegistry = sess["widget_registry"]
+    entry = reg.get(card_id)
+    if entry is None:
+        return json.dumps({"delivered": False, "card_gone": True}, ensure_ascii=False)
+
+    _emit_widget_event(
+        "widget.message",
+        sid,
+        {"card_id": card_id, "message": payload},
+    )
+    return json.dumps({"delivered": True, "card_gone": False}, ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
@@ -340,7 +373,8 @@ def _handler_for(name: str):
     return {
         "render_widget": _render_widget,
         "widget_update": _widget_update,
-        # widget_message, widget_dispose: filled in Tasks 6-7
+        "widget_message": _widget_message,
+        # widget_dispose: filled in Task 7
     }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
 
