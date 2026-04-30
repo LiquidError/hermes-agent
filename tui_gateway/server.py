@@ -2952,8 +2952,8 @@ def _spawn_widget_api_call_worker(
                     correlation_id,
                     card_id,
                     ERROR_RESPONSE_TOO_LARGE,
-                    f"widget.api_response payload {actual} bytes exceeds cap of "
-                    f"{HERMES_ASK_RESPONSE_CAP_BYTES} bytes",
+                    f"widget.api_response payload exceeds 32 KiB cap "
+                    f"(actual {actual} bytes, cap {HERMES_ASK_RESPONSE_CAP_BYTES} bytes)",
                 )
             else:
                 _emit(
