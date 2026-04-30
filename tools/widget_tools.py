@@ -9,18 +9,47 @@ Six tools:
   list_widget_examples   - discover example .tsx files
   read_widget_example    - read a specific example file
 
-This plan ships stubs returning ``{"error": "not_implemented"}``; later
-plans replace each body. The capability gate (``check_fn``) and OpenAI
-schemas land here so the agent sees the tools (when capable) from the
-moment Plan 01 ships.
+The capability gate (``check_fn``) and OpenAI schemas are visible to the
+agent the moment the client advertises ``widget.render``. The four
+lifecycle tools below dispatch through the per-session ``WidgetRegistry``
+and emit ``widget.*`` events on the bound transport. The two example
+helpers remain stubs until later plans wire them up.
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any, Optional
 
 from tools.registry import registry
-from tui_gateway.widget_runtime import is_widget_render_available
+from tui_gateway.widget_runtime import is_widget_render_available, WidgetRegistry
+
+
+# --------------------------------------------------------------------------
+# Constants
+# --------------------------------------------------------------------------
+
+SOURCE_BYTE_CAP = 256 * 1024
+MESSAGE_BYTE_CAP = 256 * 1024
+RENDER_TIMEOUT_S = 10.0
+
+ALLOWED_CAPABILITIES = {
+    "hermes.ask",
+    "notes.save",
+    "storage.get",
+    "storage.set",
+    "storage.keys",
+    "card.resize",
+    "card.set_title",
+    "card.close",
+    "os.notify",
+    "os.copy_clipboard",
+}
+
+
+# --------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------
 
 
 def _stub(tool_name: str) -> str:
@@ -32,6 +61,32 @@ def _stub(tool_name: str) -> str:
 
 def _check() -> bool:
     return is_widget_render_available()
+
+
+def _resolve_session(session_key: str) -> Optional[tuple[str, dict]]:
+    """Map session_key (HERMES_SESSION_KEY) → (sid, session_dict).
+
+    Iterates _state().sessions. Process-wide session count is small; the
+    O(n) scan is fine in the hot path.
+    """
+    from tui_gateway.server import _state
+
+    state = _state()
+    for sid, sess in state.sessions.items():
+        if sess.get("session_key") == session_key:
+            return sid, sess
+    return None
+
+
+def _err(code: int, message: str, **extra) -> str:
+    payload = {"error": {"code": code, "message": message, **extra}}
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _emit_widget_event(event_type: str, sid: str, payload: dict) -> None:
+    from tui_gateway.server import _emit
+
+    _emit(event_type, sid, payload)
 
 
 # --------------------------------------------------------------------------
@@ -162,59 +217,105 @@ READ_WIDGET_EXAMPLE_SCHEMA = {
 
 
 # --------------------------------------------------------------------------
+# render_widget
+# --------------------------------------------------------------------------
+
+
+def _render_widget(args: dict, **kwargs: Any) -> str:
+    session_key = kwargs.get("session_id", "") or ""
+    resolved = _resolve_session(session_key)
+    if resolved is None:
+        return _err(4001, "session not found")
+    sid, sess = resolved
+
+    source = args.get("source") or ""
+    capabilities = args.get("capabilities") or []
+    title = args.get("title")
+    initial_size = args.get("initial_size")
+
+    if len(source.encode("utf-8")) > SOURCE_BYTE_CAP:
+        return _err(4102, f"source exceeds {SOURCE_BYTE_CAP} bytes")
+    unknown = [c for c in capabilities if c not in ALLOWED_CAPABILITIES]
+    if unknown:
+        return _err(4101, f"unknown capabilities: {unknown}")
+
+    reg: WidgetRegistry = sess["widget_registry"]
+    card_id = reg.allocate(
+        source=source,
+        capabilities=capabilities,
+        title=title,
+        initial_size=initial_size,
+        trace_id=kwargs.get("tool_call_id"),
+    )
+
+    payload = {
+        "card_id": card_id,
+        "source": source,
+        "capabilities": list(capabilities),
+    }
+    if title is not None:
+        payload["title"] = title
+    if initial_size is not None:
+        payload["initial_size"] = initial_size
+    if kwargs.get("tool_call_id"):
+        payload["trace_id"] = kwargs["tool_call_id"]
+
+    _emit_widget_event("widget.render", sid, payload)
+
+    status, info = reg.wait_for_mount(card_id, timeout=RENDER_TIMEOUT_S)
+    if status == "mounted":
+        return json.dumps(
+            {
+                "card_id": card_id,
+                "compiled_size": info.get("compiled_size", 0),
+                "compile_ms": info.get("compile_ms", 0),
+            },
+            ensure_ascii=False,
+        )
+    if status == "error":
+        return _err(
+            5101,
+            info.get("message", "client refused to mount"),
+            phase=info.get("phase", "compile"),
+            kind=info.get("kind", "unknown"),
+            card_id=card_id,
+        )
+    # timeout
+    return _err(
+        5102,
+        f"render_widget timed out after {RENDER_TIMEOUT_S}s waiting for widget.mounted",
+        card_id=card_id,
+    )
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
-registry.register(
-    name="render_widget",
-    toolset="widget",
-    schema=RENDER_WIDGET_SCHEMA,
-    handler=lambda args, **kw: _stub("render_widget"),
-    check_fn=_check,
-    emoji="🪟",
-)
 
-registry.register(
-    name="widget_update",
-    toolset="widget",
-    schema=WIDGET_UPDATE_SCHEMA,
-    handler=lambda args, **kw: _stub("widget_update"),
-    check_fn=_check,
-    emoji="🪟",
-)
+_REGISTRATIONS: list[tuple[str, dict]] = [
+    ("render_widget", RENDER_WIDGET_SCHEMA),
+    ("widget_update", WIDGET_UPDATE_SCHEMA),
+    ("widget_message", WIDGET_MESSAGE_SCHEMA),
+    ("widget_dispose", WIDGET_DISPOSE_SCHEMA),
+    ("list_widget_examples", LIST_WIDGET_EXAMPLES_SCHEMA),
+    ("read_widget_example", READ_WIDGET_EXAMPLE_SCHEMA),
+]
 
-registry.register(
-    name="widget_message",
-    toolset="widget",
-    schema=WIDGET_MESSAGE_SCHEMA,
-    handler=lambda args, **kw: _stub("widget_message"),
-    check_fn=_check,
-    emoji="🪟",
-)
 
-registry.register(
-    name="widget_dispose",
-    toolset="widget",
-    schema=WIDGET_DISPOSE_SCHEMA,
-    handler=lambda args, **kw: _stub("widget_dispose"),
-    check_fn=_check,
-    emoji="🪟",
-)
+def _handler_for(name: str):
+    return {
+        "render_widget": _render_widget,
+        # widget_update, widget_message, widget_dispose: filled in Tasks 5-7
+    }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
-registry.register(
-    name="list_widget_examples",
-    toolset="widget",
-    schema=LIST_WIDGET_EXAMPLES_SCHEMA,
-    handler=lambda args, **kw: _stub("list_widget_examples"),
-    check_fn=_check,
-    emoji="🪟",
-)
 
-registry.register(
-    name="read_widget_example",
-    toolset="widget",
-    schema=READ_WIDGET_EXAMPLE_SCHEMA,
-    handler=lambda args, **kw: _stub("read_widget_example"),
-    check_fn=_check,
-    emoji="🪟",
-)
+for _name, _schema in _REGISTRATIONS:
+    registry.register(
+        name=_name,
+        toolset="widget",
+        schema=_schema,
+        handler=_handler_for(_name),
+        check_fn=_check,
+        emoji="🪟",
+    )

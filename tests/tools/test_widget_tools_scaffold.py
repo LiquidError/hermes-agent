@@ -41,7 +41,11 @@ def test_check_fn_returns_true_with_context():
 
 
 def test_stubs_return_not_implemented():
-    for name in WIDGET_TOOLS:
+    # Only the two example helpers remain stubs after the lifecycle tools
+    # land. The four lifecycle handlers (render_widget / widget_update /
+    # widget_message / widget_dispose) return real structured errors when
+    # invoked without a session context.
+    for name in ("list_widget_examples", "read_widget_example"):
         entry = registry.get_entry(name)
         result = entry.handler({}, callback=None)
         payload = json.loads(result)
