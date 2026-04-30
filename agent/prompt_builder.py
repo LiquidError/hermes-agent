@@ -176,6 +176,17 @@ SKILLS_GUIDANCE = (
     "Skills that aren't maintained become liabilities."
 )
 
+# Widget runtime — lean addendum loaded once at process import. Conditionally
+# appended in run_agent._build_system_prompt when render_widget is in
+# valid_tool_names. The heavy content (canvasAPI types, example .tsx files)
+# stays out of the prompt; the agent fetches it on demand via the
+# read_widget_example tool.
+_WIDGET_PROMPT_PATH = Path(__file__).resolve().parent.parent / "assets" / "widget_prompts" / "addendum.md"
+try:
+    WIDGET_AUTHOR_GUIDANCE = _WIDGET_PROMPT_PATH.read_text(encoding="utf-8").strip()
+except FileNotFoundError:
+    WIDGET_AUTHOR_GUIDANCE = ""
+
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
     "You MUST use your tools to take action — do not describe what you would do "
