@@ -663,3 +663,103 @@ decides based on window focus, session id, and its own preferences.
    triggered.
 7. **Close**: send `session.close` when the user is done, or just
    close the WebSocket — disconnect cleanup runs server-side.
+
+---
+
+## 15. Widget render
+
+Wire-level surface for the widget runtime — six events server→client, one method client→server, four event-shape messages client→server. Implemented on the Tauri side per `widget-runtime/`, on the Hermes side per `hermes-widget-runtime/`. Full per-side specs:
+
+- [hermes-widget-render-spec.md](./hermes-widget-render-spec.md) — Hermes-side spec (event shapes, tools, registries, server-side cap enforcement).
+- [tauri-agent-widget-runtime-spec.md](./tauri-agent-widget-runtime-spec.md) — Tauri-side spec (iframe sandbox, esbuild-wasm pipeline, capability broker, iframe pool).
+
+This section consolidates the wire surface so a future reader doesn't need to triangulate between the two implementation specs.
+
+### 15.1 Capability negotiation
+
+The server advertises `widget.render` in its `client.hello` capabilities array. A client opts in by including `widget.render` in its own `capabilities`. Both sides must advertise it for the runtime to be active. When either side is missing the capability, the six widget tools are not registered for that session and the agent has no widget surface.
+
+### 15.2 Server → client events
+
+```json
+{ "jsonrpc": "2.0", "method": "event", "params": {
+  "type": "widget.render",
+  "session_id": "ab12cd34",
+  "payload": {
+    "card_id": "wgt_8a3f9c",
+    "source": "export default function Card() { ... }",
+    "capabilities": ["hermes.ask", "notes.save"],
+    "title": "Quarterly notes draft",
+    "initial_size": { "w": 480, "h": 320 },
+    "trace_id": "tool_call_42"
+  }
+}}
+```
+
+`widget.update` carries `{card_id, source, capabilities?}` — replace source on a live card; React state resets, position preserved.
+
+`widget.message` carries `{card_id, message}` — push a structured payload (≤256 KiB) into a live card without remount.
+
+`widget.dispose` carries `{card_id, reason}` — close a live card. Idempotent both sides.
+
+`widget.api_response` carries `{correlation_id, card_id, result}` on success or `{correlation_id, card_id, error: {code, message}}` on error. Resolves the iframe's pending `canvasAPI.hermes.ask` Promise.
+
+`widget.api_cancel` (server-emitted) carries `{correlation_id, card_id, reason}` — abort an in-flight `widget.api_call`. Reasons include `card_disposed`, `session_ended`.
+
+### 15.3 Client → server method
+
+```json
+{ "jsonrpc": "2.0", "id": 17, "method": "widget.api_call", "params": {
+  "card_id": "wgt_8a3f9c",
+  "session_id": "ab12cd34",
+  "correlation_id": "corr_a1b2c3",
+  "capability": "hermes.ask",
+  "args": { "prompt": "What was Q3 revenue?" }
+}}
+```
+
+Server responds synchronously with `{accepted: true, correlation_id}` after validation; the actual answer arrives later as a `widget.api_response` event keyed by `correlation_id`. Validation errors return a JSON-RPC error with one of the codes in §15.6.
+
+### 15.4 Client → server events
+
+These use the same envelope shape as server→client events but originate from the client and have no `id` field.
+
+`widget.mounted` — `{card_id, compiled_size, compile_ms}`.
+
+`widget.error` — `{card_id, phase, kind, message, stack}`. `phase` ∈ `validate`, `compile`, `mount`, `runtime`, `capability`.
+
+`widget.disposed` — `{card_id, reason}`. Reasons from the client side: `user_closed`, `agent_disposed`, `superseded`, `error`, `session_ended`.
+
+`widget.api_cancel` (client-emitted) — `{correlation_id, card_id, reason}`. Reasons: `card_disposed`, `card_updated`, `user_cancelled`.
+
+### 15.5 Caps and limits
+
+- `widget.render.payload.source`: max 256 KiB.
+- `widget.message.payload`: max 256 KiB.
+- `widget.api_response.result`: hard cap 32 KiB. Server-side enforcement before emit; over-cap responses are converted to error 4106.
+- Card ID format: `wgt_<6 lowercase hex>`. Server allocates; client validates against `/^wgt_[0-9a-f]{6}$/`.
+
+### 15.6 Error codes
+
+| Code | Meaning |
+|---|---|
+| 4101 | Unknown capability declared in `widget.render` or called via `widget.api_call`. |
+| 4102 | Source exceeds 256 KiB cap. |
+| 4103 | Card id unknown for `widget.update` / `widget.message` / `widget.dispose` / `widget.api_call`. |
+| 4104 | Capability not declared in card's manifest. |
+| 4105 | Card capability call rejected by user (reserved for a future approval gate). |
+| 4106 | `widget.api_response` payload exceeds 32 KiB cap. |
+| 4107 | `widget.message` payload exceeds 256 KiB cap. |
+| 5101 | Tauri client refused to mount (compile or validate failure). Carries inner error in payload. |
+| 5102 | `render_widget` tool timed out waiting for `widget.mounted`. |
+| 5103 | `widget.api_call` correlation expired or worker crashed. |
+
+### 15.7 Idempotency and races
+
+- Both server-initiated `widget.dispose` and client-initiated `widget.disposed` can fire for the same card simultaneously. Each side treats its own action as canonical, drops the incoming, and converges on the same end state.
+- When a card is disposed mid-`widget.api_call`, the server cancels the correlation, attempts to interrupt the underlying work, and emits `widget.api_cancel`. Late-arriving results are dropped without emitting `widget.api_response`.
+- Session disconnect cancels every in-flight `widget.api_call` correlation with `reason: "session_ended"`.
+
+### 15.8 Persistence
+
+Widgets are session-scoped. They do not survive `session.resume`. `session.branch` does not duplicate live widgets; the new branch starts with no cards.
