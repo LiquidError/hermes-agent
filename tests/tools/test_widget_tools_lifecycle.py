@@ -142,3 +142,44 @@ def test_render_widget_times_out(monkeypatch, session):
         session_id=key,
     )
     assert result["error"]["code"] == 5102
+
+
+def test_widget_update_emits_widget_update_and_returns_updated(monkeypatch, session):
+    sid, key, sess = session
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="old", capabilities=["hermes.ask"], title=None, initial_size=None, trace_id=None)
+
+    result = _call(
+        "widget_update",
+        {"card_id": cid, "source": "new"},
+        session_id=key,
+    )
+    assert result == {"updated": True, "card_gone": False}
+    assert reg.get(cid).source == "new"
+    assert any(e[0] == "widget.update" and e[1] == sid and e[2]["card_id"] == cid for e in emits)
+
+
+def test_widget_update_signals_card_gone_for_unknown(monkeypatch, session):
+    sid, key, _ = session
+    monkeypatch.setattr(server, "_emit", lambda *a: None)
+    result = _call(
+        "widget_update",
+        {"card_id": "wgt_deadbe", "source": "x"},
+        session_id=key,
+    )
+    assert result == {"updated": False, "card_gone": True}
+
+
+def test_widget_update_propagates_capabilities_when_provided(monkeypatch, session):
+    sid, key, sess = session
+    monkeypatch.setattr(server, "_emit", lambda *a: None)
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="old", capabilities=["hermes.ask"], title=None, initial_size=None, trace_id=None)
+    _call(
+        "widget_update",
+        {"card_id": cid, "source": "new", "capabilities": ["notes.save"]},
+        session_id=key,
+    )
+    assert reg.get(cid).capabilities == ["notes.save"]

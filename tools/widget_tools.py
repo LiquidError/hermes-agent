@@ -289,6 +289,39 @@ def _render_widget(args: dict, **kwargs: Any) -> str:
 
 
 # --------------------------------------------------------------------------
+# widget_update
+# --------------------------------------------------------------------------
+
+
+def _widget_update(args: dict, **kwargs: Any) -> str:
+    session_key = kwargs.get("session_id", "") or ""
+    resolved = _resolve_session(session_key)
+    if resolved is None:
+        return _err(4001, "session not found")
+    sid, sess = resolved
+
+    card_id = args.get("card_id") or ""
+    source = args.get("source") or ""
+    capabilities = args.get("capabilities")
+
+    if len(source.encode("utf-8")) > SOURCE_BYTE_CAP:
+        return _err(4102, f"source exceeds {SOURCE_BYTE_CAP} bytes")
+    if capabilities is not None:
+        unknown = [c for c in capabilities if c not in ALLOWED_CAPABILITIES]
+        if unknown:
+            return _err(4101, f"unknown capabilities: {unknown}")
+
+    reg: WidgetRegistry = sess["widget_registry"]
+    updated, gone = reg.update_source(card_id, source=source, capabilities=capabilities)
+    if updated:
+        payload = {"card_id": card_id, "source": source}
+        if capabilities is not None:
+            payload["capabilities"] = list(capabilities)
+        _emit_widget_event("widget.update", sid, payload)
+    return json.dumps({"updated": updated, "card_gone": gone}, ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
@@ -306,7 +339,8 @@ _REGISTRATIONS: list[tuple[str, dict]] = [
 def _handler_for(name: str):
     return {
         "render_widget": _render_widget,
-        # widget_update, widget_message, widget_dispose: filled in Tasks 5-7
+        "widget_update": _widget_update,
+        # widget_message, widget_dispose: filled in Tasks 6-7
     }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
 
