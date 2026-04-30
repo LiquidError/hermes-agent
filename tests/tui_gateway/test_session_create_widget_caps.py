@@ -1,5 +1,4 @@
 import types
-from unittest.mock import patch
 
 from tui_gateway import server
 

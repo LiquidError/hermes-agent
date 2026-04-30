@@ -1363,11 +1363,20 @@ def _background_agent_kwargs(agent, task_id: str) -> dict:
 
 
 def _reset_session_agent(sid: str, session: dict) -> dict:
+    from tui_gateway.widget_runtime import (
+        set_widget_render_available,
+        reset_widget_render_available,
+    )
+    caps = session.get("client_capabilities", [])
     tokens = _set_session_context(session["session_key"])
     try:
-        new_agent = _make_agent(
-            sid, session["session_key"], session_id=session["session_key"]
-        )
+        widget_token = set_widget_render_available("widget.render" in caps)
+        try:
+            new_agent = _make_agent(
+                sid, session["session_key"], session_id=session["session_key"]
+            )
+        finally:
+            reset_widget_render_available(widget_token)
     finally:
         _clear_session_context(tokens)
     session["agent"] = new_agent
@@ -1795,10 +1804,8 @@ def _(rid, params: dict) -> dict:
                 reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
+        _state().sessions.setdefault(sid, {})["client_capabilities"] = resume_caps
         _init_session(sid, target, agent, history, cols=int(params.get("cols", 80)))
-        state = _state()
-        if sid in state.sessions:
-            state.sessions[sid]["client_capabilities"] = resume_caps
     except Exception as e:
         return _err(rid, 5000, f"resume failed: {e}")
     return _ok(
@@ -2014,12 +2021,10 @@ def _(rid, params: dict) -> dict:
                 reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
+        _state().sessions.setdefault(new_sid, {})["client_capabilities"] = branch_caps
         _init_session(
             new_sid, new_key, agent, list(history), cols=session.get("cols", 80)
         )
-        branch_state = _state()
-        if new_sid in branch_state.sessions:
-            branch_state.sessions[new_sid]["client_capabilities"] = branch_caps
     except Exception as e:
         return _err(rid, 5000, f"agent init failed on branch: {e}")
     return _ok(rid, {"session_id": new_sid, "title": title, "parent": old_key})
