@@ -2805,6 +2805,94 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"status": "running"})
 
 
+# ── Methods: widget.api_call ─────────────────────────────────────────
+# Capabilities that round-trip to Hermes (require a server-side prompt.btw).
+# Cards declaring other capabilities (notes.save, storage.*, etc.) are
+# handled entirely by the Tauri broker and never reach this handler.
+_HERMES_BACKED_CAPABILITIES = {"hermes.ask"}
+
+
+@method("widget.api_call")
+def _(rid, params: dict) -> dict:
+    from tui_gateway.widget_constants import (
+        ERROR_CAP_NOT_DECLARED,
+        ERROR_UNKNOWN_CAPABILITY,
+        ERROR_UNKNOWN_CARD,
+    )
+
+    sid = params.get("session_id", "") or ""
+    card_id = params.get("card_id", "") or ""
+    correlation_id = params.get("correlation_id", "") or ""
+    capability = params.get("capability", "") or ""
+    call_args = params.get("args") or {}
+
+    state = _state()
+    sess = state.sessions.get(sid)
+    if sess is None:
+        return _err(rid, 4001, "session not found")
+    if capability not in _HERMES_BACKED_CAPABILITIES:
+        return _err(
+            rid,
+            ERROR_UNKNOWN_CAPABILITY,
+            f"unsupported widget.api_call capability: {capability!r}",
+        )
+
+    widget_reg = sess.get("widget_registry")
+    api_reg = sess.get("api_call_registry")
+    if widget_reg is None or api_reg is None:
+        return _err(rid, 4001, "session has no widget runtime")
+
+    entry = widget_reg.get(card_id)
+    if entry is None:
+        return _err(rid, ERROR_UNKNOWN_CARD, f"card not live: {card_id!r}")
+    if capability not in entry.capabilities:
+        return _err(
+            rid,
+            ERROR_CAP_NOT_DECLARED,
+            f"capability {capability!r} not declared by card {card_id!r}",
+        )
+
+    api_reg.register(
+        correlation_id=correlation_id,
+        card_id=card_id,
+        capability=capability,
+        # Plan 04 stashes the actual agent for cancellation.
+        agent_ref=None,
+    )
+
+    # Spawn the work in a background thread; the worker emits
+    # widget.api_response when it completes.
+    _spawn_widget_api_call_worker(
+        sid=sid,
+        session_key=sess.get("session_key", ""),
+        correlation_id=correlation_id,
+        card_id=card_id,
+        capability=capability,
+        call_args=call_args,
+        history_snapshot=list(sess.get("history") or []),
+    )
+
+    return _ok(rid, {"accepted": True, "correlation_id": correlation_id})
+
+
+def _spawn_widget_api_call_worker(
+    *,
+    sid,
+    session_key,
+    correlation_id,
+    card_id,
+    capability,
+    call_args,
+    history_snapshot,
+):
+    """Run the capability call as a prompt.btw and emit widget.api_response.
+
+    Defined as a module-level function (not a closure) so tests can
+    monkey-patch it. Worker body lands in Task 5.
+    """
+    raise NotImplementedError
+
+
 # ── Methods: respond ─────────────────────────────────────────────────
 
 
