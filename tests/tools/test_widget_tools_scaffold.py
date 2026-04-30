@@ -1,4 +1,4 @@
-"""Six widget tools register, gated by capability ContextVar; stubs return not_implemented."""
+"""Six widget tools register and are gated by the widget_render capability ContextVar."""
 
 import json
 
@@ -40,17 +40,15 @@ def test_check_fn_returns_true_with_context():
         widget_runtime.reset_widget_render_available(token)
 
 
-def test_stubs_return_not_implemented():
-    # Only the two example helpers remain stubs after the lifecycle tools
-    # land. The four lifecycle handlers (render_widget / widget_update /
-    # widget_message / widget_dispose) return real structured errors when
-    # invoked without a session context.
-    for name in ("list_widget_examples", "read_widget_example"):
+def test_no_stubs_remain():
+    # Every widget tool has a real implementation now. Calling each with
+    # empty args must not return the {"error": "not_implemented"} stub
+    # shape — guard against accidentally re-stubbing during refactors.
+    for name in WIDGET_TOOLS:
         entry = registry.get_entry(name)
         result = entry.handler({}, callback=None)
         payload = json.loads(result)
-        assert payload.get("error") == "not_implemented"
-        assert payload.get("tool") == name
+        assert payload.get("error") != "not_implemented", f"{name} is still a stub"
 
 
 def test_get_definitions_excludes_widget_tools_without_cap():

@@ -19,6 +19,8 @@ helpers remain stubs until later plans wire them up.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, Optional
 
 from tools.registry import registry
@@ -52,6 +54,31 @@ ALLOWED_CAPABILITIES = {
     "os.notify",
     "os.copy_clipboard",
 }
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "assets" / "widget_prompts" / "examples"
+
+# Names are alphanumeric + dashes/underscores; no slashes, no dots, no traversal.
+_VALID_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+_JSDOC_OPEN_RE = re.compile(r"^\s*/\*\*\s*$")
+_JSDOC_LINE_STRIP_RE = re.compile(r"^\s*\*\s?")
+
+
+def _extract_summary(text: str) -> str:
+    """Pull the first non-blank line of the leading JSDoc block, or '' if none."""
+    in_block = False
+    for line in text.splitlines():
+        if not in_block:
+            if _JSDOC_OPEN_RE.match(line):
+                in_block = True
+            continue
+        stripped = _JSDOC_LINE_STRIP_RE.sub("", line).rstrip()
+        if not stripped or stripped == "/":
+            continue
+        if "*/" in stripped:
+            break
+        return stripped[:200]
+    return ""
 
 
 # --------------------------------------------------------------------------
@@ -425,12 +452,55 @@ _REGISTRATIONS: list[tuple[str, dict]] = [
 ]
 
 
+def _list_widget_examples(args: dict, **kwargs: Any) -> str:
+    if not EXAMPLES_DIR.is_dir():
+        return json.dumps({"examples": []}, ensure_ascii=False)
+
+    items = []
+    for path in sorted(EXAMPLES_DIR.iterdir()):
+        if path.suffix != ".tsx":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        summary = _extract_summary(text) or f"{path.stem} example"
+        items.append({"name": path.stem, "summary": summary})
+
+    return json.dumps({"examples": items}, ensure_ascii=False)
+
+
+def _read_widget_example(args: dict, **kwargs: Any) -> str:
+    name = (args.get("name") or "").strip()
+    if not name or not _VALID_NAME_RE.match(name):
+        return _err(4012, f"invalid example name: {name!r}", kind="invalid_name")
+
+    path = EXAMPLES_DIR / f"{name}.tsx"
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(EXAMPLES_DIR.resolve())
+    except (OSError, ValueError):
+        return _err(4012, f"invalid example path: {name!r}", kind="invalid_path")
+
+    if not resolved.is_file():
+        return _err(4001, f"example not found: {name!r}", kind="not_found")
+
+    try:
+        content = resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _err(5001, f"failed to read example: {exc}", kind="io_error")
+
+    return json.dumps({"name": name, "content": content}, ensure_ascii=False)
+
+
 def _handler_for(name: str):
     return {
         "render_widget": _render_widget,
         "widget_update": _widget_update,
         "widget_message": _widget_message,
         "widget_dispose": _widget_dispose,
+        "list_widget_examples": _list_widget_examples,
+        "read_widget_example": _read_widget_example,
     }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
 
