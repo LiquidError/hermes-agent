@@ -27,6 +27,7 @@ from tui_gateway.transport import (
     current_transport,
     reset_transport,
 )
+from tui_gateway.widget_runtime import WidgetRegistry as _WidgetRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -1481,6 +1482,7 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         # Pin async event emissions to whichever transport created the
         # session (stdio for Ink, JSON-RPC WS for the dashboard sidebar).
         "transport": current_transport() or _stdio_transport,
+        "widget_registry": existing.get("widget_registry") or _WidgetRegistry(),
     }
     _register_session(sid)
     try:
@@ -1628,6 +1630,7 @@ def _(rid, params: dict) -> dict:
         "tool_progress_mode": _load_tool_progress_mode(),
         "tool_started_at": {},
         "transport": current_transport() or _stdio_transport,
+        "widget_registry": _WidgetRegistry(),
     }
     _register_session(sid)
 
@@ -4884,3 +4887,13 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5002, "command timed out (30s)")
     except Exception as e:
         return _err(rid, 5003, str(e))
+
+
+# Wire inbound widget.* event handlers into the dispatch path. Imported
+# at the bottom so the event_handler decorator and _event_handlers map
+# are already defined.
+from tui_gateway.widget_runtime import (  # noqa: E402
+    _register_inbound_event_handlers as _reg_widget_inbound,
+)
+
+_reg_widget_inbound()

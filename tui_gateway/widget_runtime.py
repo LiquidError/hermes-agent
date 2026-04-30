@@ -162,3 +162,61 @@ class WidgetRegistry:
                 )
                 entry._resolved.set()
             return (True, False)
+
+
+def _registry_for(session_id: str) -> Optional["WidgetRegistry"]:
+    """Look up the per-session WidgetRegistry by sid. Returns None if no session."""
+    from tui_gateway.server import _state_for_session
+
+    state = _state_for_session(session_id)
+    sess = state.sessions.get(session_id) or {}
+    return sess.get("widget_registry")
+
+
+def _register_inbound_event_handlers() -> None:
+    """Wire the three inbound widget.* events into tui_gateway.server.
+
+    Called from server module init so the handlers exist before any
+    client connects.
+    """
+    from tui_gateway.server import event_handler
+
+    @event_handler("widget.mounted")
+    def _on_mounted(params: dict) -> None:
+        sid = params.get("session_id", "")
+        payload = params.get("payload") or {}
+        reg = _registry_for(sid)
+        if reg is None:
+            return
+        reg.mark_mounted(
+            payload.get("card_id", ""),
+            compiled_size=int(payload.get("compiled_size", 0) or 0),
+            compile_ms=int(payload.get("compile_ms", 0) or 0),
+        )
+
+    @event_handler("widget.error")
+    def _on_error(params: dict) -> None:
+        sid = params.get("session_id", "")
+        payload = params.get("payload") or {}
+        reg = _registry_for(sid)
+        if reg is None:
+            return
+        reg.mark_error(
+            payload.get("card_id", ""),
+            phase=str(payload.get("phase", "unknown")),
+            kind=str(payload.get("kind", "unknown")),
+            message=str(payload.get("message", "")),
+            stack=str(payload.get("stack", "")),
+        )
+
+    @event_handler("widget.disposed")
+    def _on_disposed(params: dict) -> None:
+        sid = params.get("session_id", "")
+        payload = params.get("payload") or {}
+        reg = _registry_for(sid)
+        if reg is None:
+            return
+        reg.dispose(
+            payload.get("card_id", ""),
+            reason=str(payload.get("reason", "user_closed")),
+        )
