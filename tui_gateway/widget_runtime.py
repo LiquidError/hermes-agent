@@ -228,6 +228,11 @@ class ApiCallRegistry:
             entry.cancel_reason = reason
         return entry
 
+    def snapshot_inflight(self) -> list[ApiCallEntry]:
+        """Return a thread-safe shallow copy of all in-flight entries."""
+        with self._lock:
+            return list(self._inflight.values())
+
     def cancel_for_card(self, card_id: str, reason: str) -> list[ApiCallEntry]:
         cancelled: list[ApiCallEntry] = []
         with self._lock:

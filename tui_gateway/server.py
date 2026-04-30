@@ -1985,7 +1985,32 @@ def _(rid, params: dict) -> dict:
 @method("session.close")
 def _(rid, params: dict) -> dict:
     sid = params.get("session_id", "")
-    session = _state().sessions.pop(sid, None)
+    sessions = _state().sessions
+    session = sessions.get(sid)
+    if session is not None:
+        # Cancel every in-flight widget.api_call correlation and emit
+        # widget.api_cancel before tearing down the session dict.
+        api_reg = session.get("api_call_registry")
+        if api_reg is not None:
+            for snapshot in api_reg.snapshot_inflight():
+                entry = api_reg.cancel(snapshot.correlation_id, reason="session_ended")
+                if entry is None:
+                    continue
+                _emit(
+                    "widget.api_cancel",
+                    sid,
+                    {
+                        "correlation_id": entry.correlation_id,
+                        "card_id": entry.card_id,
+                        "reason": "session_ended",
+                    },
+                )
+                if entry.agent_ref is not None:
+                    try:
+                        entry.agent_ref.interrupt()
+                    except Exception:
+                        pass
+    session = sessions.pop(sid, None)
     _unregister_session(sid)
     if not session:
         return _ok(rid, {"closed": False})
