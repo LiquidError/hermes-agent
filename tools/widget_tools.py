@@ -377,8 +377,29 @@ def _widget_dispose(args: dict, **kwargs: Any) -> str:
     reason = str(args.get("reason") or "task_complete")
 
     reg: WidgetRegistry = sess["widget_registry"]
+    api_reg = sess.get("api_call_registry")
+
     disposed, already = reg.dispose(card_id, reason=reason)
     if disposed:
+        # Before the dispose event, cancel any in-flight calls tied to this
+        # card and emit widget.api_cancel for each correlation.
+        if api_reg is not None:
+            cancelled = api_reg.cancel_for_card(card_id, reason="card_disposed")
+            for entry in cancelled:
+                if entry.agent_ref is not None:
+                    try:
+                        entry.agent_ref.interrupt()
+                    except Exception:
+                        pass
+                _emit_widget_event(
+                    "widget.api_cancel",
+                    sid,
+                    {
+                        "correlation_id": entry.correlation_id,
+                        "card_id": card_id,
+                        "reason": "card_disposed",
+                    },
+                )
         _emit_widget_event(
             "widget.dispose",
             sid,

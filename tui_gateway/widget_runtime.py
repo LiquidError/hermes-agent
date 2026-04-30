@@ -228,7 +228,8 @@ class ApiCallRegistry:
             entry.cancel_reason = reason
         return entry
 
-    def cancel_for_card(self, card_id: str, reason: str) -> list[str]:
+    def cancel_for_card(self, card_id: str, reason: str) -> list[ApiCallEntry]:
+        cancelled: list[ApiCallEntry] = []
         with self._lock:
             ids = [c for c, e in self._inflight.items() if e.card_id == card_id]
             for c in ids:
@@ -236,7 +237,8 @@ class ApiCallRegistry:
                 if entry is not None:
                     entry.cancelled_at = time.time()
                     entry.cancel_reason = reason
-        return ids
+                    cancelled.append(entry)
+        return cancelled
 
 
 def _registry_for(session_id: str) -> Optional["WidgetRegistry"]:
@@ -298,13 +300,32 @@ def _register_inbound_event_handlers() -> None:
     def _on_disposed(params: dict) -> None:
         sid = params.get("session_id", "")
         payload = params.get("payload") or {}
+        card_id = payload.get("card_id", "")
         reg = _registry_for(sid)
         if reg is None:
             return
         reg.dispose(
-            payload.get("card_id", ""),
+            card_id,
             reason=str(payload.get("reason", "user_closed")),
         )
+
+        # Cascade-cancel any in-flight api_call correlations for this card.
+        # Do NOT emit outbound widget.api_cancel — the client already knows
+        # the card is gone.
+        sessions = _state_for_session_safe(sid)
+        sess = (sessions or {}).get(sid) if sessions else None
+        if not sess:
+            return
+        api_reg = sess.get("api_call_registry")
+        if api_reg is None:
+            return
+        cancelled = api_reg.cancel_for_card(card_id, reason="user_closed")
+        for entry in cancelled:
+            if entry.agent_ref is not None:
+                try:
+                    entry.agent_ref.interrupt()
+                except Exception:
+                    pass
 
     @event_handler("widget.api_cancel")
     def _on_api_cancel(params: dict) -> None:

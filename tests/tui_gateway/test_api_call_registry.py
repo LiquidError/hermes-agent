@@ -65,7 +65,7 @@ def test_cancel_for_card_returns_all_correlations_for_that_card():
     reg.register(correlation_id="corr_3", card_id="wgt_b", capability="hermes.ask", agent_ref=None)
 
     cancelled = reg.cancel_for_card("wgt_a", reason="card_disposed")
-    assert sorted(cancelled) == ["corr_1", "corr_2"]
+    assert sorted(e.correlation_id for e in cancelled) == ["corr_1", "corr_2"]
     assert reg.get("corr_1") is None
     assert reg.get("corr_2") is None
     assert reg.get("corr_3") is not None
