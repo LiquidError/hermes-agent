@@ -89,6 +89,16 @@ def _register_client_hello() -> None:
         except Exception:
             server_version = "hermes-agent"
 
+        try:
+            transport = _tg_server.current_transport()
+        except Exception:
+            transport = None
+        if transport is not None:
+            try:
+                setattr(transport, "client_capabilities", list(client_caps))
+            except Exception:
+                pass
+
         result = {
             "server_version": server_version,
             "protocol_version": PROTOCOL_VERSION,
@@ -113,6 +123,7 @@ def _register_client_hello() -> None:
                 # when a long turn finishes off-screen).
                 "message.complete",
                 "tool.complete",
+                "widget.render",
             ],
             "client_id": client_id,
             "client_version": client_version,
