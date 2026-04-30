@@ -355,6 +355,34 @@ def _widget_message(args: dict, **kwargs: Any) -> str:
 
 
 # --------------------------------------------------------------------------
+# widget_dispose
+# --------------------------------------------------------------------------
+
+
+def _widget_dispose(args: dict, **kwargs: Any) -> str:
+    session_key = kwargs.get("session_id", "") or ""
+    resolved = _resolve_session(session_key)
+    if resolved is None:
+        return _err(4001, "session not found")
+    sid, sess = resolved
+
+    card_id = args.get("card_id") or ""
+    reason = str(args.get("reason") or "task_complete")
+
+    reg: WidgetRegistry = sess["widget_registry"]
+    disposed, already = reg.dispose(card_id, reason=reason)
+    if disposed:
+        _emit_widget_event(
+            "widget.dispose",
+            sid,
+            {"card_id": card_id, "reason": reason},
+        )
+    return json.dumps(
+        {"disposed": disposed, "already_disposed": already}, ensure_ascii=False
+    )
+
+
+# --------------------------------------------------------------------------
 # Registration
 # --------------------------------------------------------------------------
 
@@ -374,7 +402,7 @@ def _handler_for(name: str):
         "render_widget": _render_widget,
         "widget_update": _widget_update,
         "widget_message": _widget_message,
-        # widget_dispose: filled in Task 7
+        "widget_dispose": _widget_dispose,
     }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
 

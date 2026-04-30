@@ -227,3 +227,52 @@ def test_widget_message_rejects_oversized_payload(monkeypatch, session):
         session_id=key,
     )
     assert result["error"]["code"] == 4107
+
+
+def test_widget_dispose_emits_dispose_and_returns_disposed(monkeypatch, session):
+    sid, key, sess = session
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="x", capabilities=[], title=None, initial_size=None, trace_id=None)
+
+    result = _call(
+        "widget_dispose",
+        {"card_id": cid, "reason": "task_complete"},
+        session_id=key,
+    )
+    assert result == {"disposed": True, "already_disposed": False}
+    assert reg.get(cid) is None
+    dispose_emit = next(e for e in emits if e[0] == "widget.dispose")
+    assert dispose_emit[1] == sid
+    assert dispose_emit[2]["card_id"] == cid
+    assert dispose_emit[2]["reason"] == "task_complete"
+
+
+def test_widget_dispose_idempotent_for_already_disposed(monkeypatch, session):
+    sid, key, sess = session
+    emits = []
+    monkeypatch.setattr(server, "_emit", lambda *a: emits.append(a))
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="x", capabilities=[], title=None, initial_size=None, trace_id=None)
+    reg.dispose(cid, reason="user_closed")  # client got there first
+
+    result = _call(
+        "widget_dispose",
+        {"card_id": cid},
+        session_id=key,
+    )
+    assert result == {"disposed": False, "already_disposed": True}
+    # No widget.dispose emit for an already-disposed card.
+    assert not any(e[0] == "widget.dispose" for e in emits)
+
+
+def test_widget_dispose_idempotent_for_unknown_card(monkeypatch, session):
+    sid, key, _ = session
+    monkeypatch.setattr(server, "_emit", lambda *a: None)
+    result = _call(
+        "widget_dispose",
+        {"card_id": "wgt_neverexisted"},
+        session_id=key,
+    )
+    assert result == {"disposed": False, "already_disposed": True}
