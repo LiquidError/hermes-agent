@@ -170,7 +170,9 @@ class ApiCallEntry:
     correlation_id: str
     card_id: str
     capability: str
-    # The AIAgent running the prompt.btw — used by Plan 04 for cancellation.
+    # The AIAgent running the prompt.btw, populated after construction so
+    # widget.api_cancel / card disposal can call agent.interrupt() to abort
+    # the in-flight call. None until the worker stashes it.
     agent_ref: Any
     created_at: float
     completed_at: Optional[float] = None
@@ -181,10 +183,9 @@ class ApiCallEntry:
 class ApiCallRegistry:
     """Per-session map of in-flight widget.api_call correlations.
 
-    Plan 03 implements register/get/complete and the cancel methods that
-    Plan 04 will wire to agent.interrupt() and to drop-on-arrival logic.
     Cancelled entries are removed from the active map; the snapshot is
-    returned for observability (Plan 04 logs post-cancel runtime).
+    returned to the caller so post-cancel runtime can be logged for
+    observability when a btw still finishes after cancel.
     """
 
     def __init__(self) -> None:

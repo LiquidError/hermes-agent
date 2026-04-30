@@ -144,8 +144,8 @@ def test_worker_emits_api_response_on_success(monkeypatch):
         history_snapshot=[],
     )
 
-    # Worker runs sync if we don't actually thread; but Plan 03 does
-    # spawn a thread. Wait briefly.
+    # The worker spawns a daemon thread, so the emit happens asynchronously.
+    # Poll briefly for the captured emit.
     for _ in range(100):
         if emits:
             break

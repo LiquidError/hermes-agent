@@ -39,10 +39,11 @@ def test_no_id_field_does_not_produce_response():
     assert resp is None, "events must not produce a response"
 
 
-def test_all_four_widget_inbound_events_route():
-    """widget.mounted, widget.error, widget.disposed (this plan) plus
-    widget.api_cancel (Plan 04) must all have registered handlers.
-    Plan 02 ships three of four; this test guards the trio.
+def test_widget_inbound_events_route():
+    """widget.mounted, widget.error, widget.disposed must all have registered
+    handlers. (widget.api_cancel is asserted in
+    test_widget_api_cancel_envelope_alignment.py alongside the cancel flow
+    it belongs to.)
     """
     expected = {"widget.mounted", "widget.error", "widget.disposed"}
     assert expected.issubset(set(server._event_handlers))

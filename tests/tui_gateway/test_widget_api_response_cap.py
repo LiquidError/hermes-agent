@@ -1,7 +1,7 @@
 """Cross-machine alignment: widget.api_response is hard-capped at 32 KiB.
 
-The Tauri side (Plan 02) assumes it never receives an oversized payload.
-A regression here would crash iframe rendering or trigger client-side
+The Tauri client assumes it never receives an oversized payload. A
+regression here would crash iframe rendering or trigger client-side
 DoS guards. Tested with three boundary cases.
 """
 

@@ -54,7 +54,8 @@ def test_cancel_marks_cancelled_and_keeps_entry_for_observability():
     assert e.cancelled_at is not None
     assert e.cancel_reason == "card_disposed"
     # Cancellation removes the entry from the active map; the returned
-    # entry is the snapshot. (Plan 04 wires interrupt + drop-on-arrival.)
+    # entry is the snapshot used by the cancel-cascade callers to call
+    # agent.interrupt() on the captured agent_ref.
     assert reg.get("corr_z") is None
 
 
@@ -76,7 +77,7 @@ def test_post_cancel_runtime_measurement():
     reg.register(correlation_id="corr_o", card_id="wgt_o", capability="hermes.ask", agent_ref=None)
     e_cancelled = reg.cancel("corr_o", reason="card_disposed")
     time.sleep(0.05)
-    # Plan 04 will use this for observability when btw still produces a
-    # response after cancellation. This test asserts the snapshot has
-    # the timestamp we'll diff against.
+    # Snapshot carries the cancellation timestamp; callers diff it
+    # against completed_at when a btw still finishes after cancel, so
+    # post-cancel runtime is loggable for observability.
     assert e_cancelled.cancelled_at is not None

@@ -2881,7 +2881,8 @@ def _(rid, params: dict) -> dict:
         correlation_id=correlation_id,
         card_id=card_id,
         capability=capability,
-        # Plan 04 stashes the actual agent for cancellation.
+        # The worker stashes the live AIAgent on the entry once constructed;
+        # cancellation reads it back to call agent.interrupt().
         agent_ref=None,
     )
 
@@ -2944,8 +2945,8 @@ def _spawn_widget_api_call_worker(
                     max_iterations=8,
                     enabled_toolsets=[],
                 )
-                # Capture the agent so Plan 04 can call agent.interrupt()
-                # for cancellation.
+                # Stash the live agent on the registry entry so a concurrent
+                # widget.api_cancel can call agent.interrupt() to abort.
                 if api_reg is not None and entry is not None:
                     entry.agent_ref = btw_agent
                 result = btw_agent.run_conversation(
