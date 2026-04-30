@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import secrets
 import threading
+import time
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 _WIDGET_RENDER_AVAILABLE: ContextVar[bool] = ContextVar(
     "widget_render_available", default=False
@@ -162,6 +163,80 @@ class WidgetRegistry:
                 )
                 entry._resolved.set()
             return (True, False)
+
+
+@dataclass
+class ApiCallEntry:
+    correlation_id: str
+    card_id: str
+    capability: str
+    # The AIAgent running the prompt.btw — used by Plan 04 for cancellation.
+    agent_ref: Any
+    created_at: float
+    completed_at: Optional[float] = None
+    cancelled_at: Optional[float] = None
+    cancel_reason: Optional[str] = None
+
+
+class ApiCallRegistry:
+    """Per-session map of in-flight widget.api_call correlations.
+
+    Plan 03 implements register/get/complete and the cancel methods that
+    Plan 04 will wire to agent.interrupt() and to drop-on-arrival logic.
+    Cancelled entries are removed from the active map; the snapshot is
+    returned for observability (Plan 04 logs post-cancel runtime).
+    """
+
+    def __init__(self) -> None:
+        self._inflight: dict[str, ApiCallEntry] = {}
+        self._lock = threading.RLock()
+
+    def register(
+        self,
+        correlation_id: str,
+        card_id: str,
+        capability: str,
+        agent_ref: Any,
+    ) -> ApiCallEntry:
+        entry = ApiCallEntry(
+            correlation_id=correlation_id,
+            card_id=card_id,
+            capability=capability,
+            agent_ref=agent_ref,
+            created_at=time.time(),
+        )
+        with self._lock:
+            self._inflight[correlation_id] = entry
+        return entry
+
+    def get(self, correlation_id: str) -> Optional[ApiCallEntry]:
+        with self._lock:
+            return self._inflight.get(correlation_id)
+
+    def complete(self, correlation_id: str) -> Optional[ApiCallEntry]:
+        with self._lock:
+            entry = self._inflight.pop(correlation_id, None)
+        if entry is not None:
+            entry.completed_at = time.time()
+        return entry
+
+    def cancel(self, correlation_id: str, reason: str) -> Optional[ApiCallEntry]:
+        with self._lock:
+            entry = self._inflight.pop(correlation_id, None)
+        if entry is not None:
+            entry.cancelled_at = time.time()
+            entry.cancel_reason = reason
+        return entry
+
+    def cancel_for_card(self, card_id: str, reason: str) -> list[str]:
+        with self._lock:
+            ids = [c for c, e in self._inflight.items() if e.card_id == card_id]
+            for c in ids:
+                entry = self._inflight.pop(c, None)
+                if entry is not None:
+                    entry.cancelled_at = time.time()
+                    entry.cancel_reason = reason
+        return ids
 
 
 def _registry_for(session_id: str) -> Optional["WidgetRegistry"]:
