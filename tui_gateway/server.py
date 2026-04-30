@@ -2901,6 +2901,7 @@ def _spawn_widget_api_call_worker(
 
     def run():
         session_tokens = []
+        entry = None
         try:
             session_tokens = _set_session_context(session_key)
             from run_agent import AIAgent
@@ -2943,6 +2944,21 @@ def _spawn_widget_api_call_worker(
                     api_reg.complete(correlation_id)
                 return
 
+            # Drop-on-arrival: if the correlation was registered at the
+            # start of this worker but is no longer active, it was cancelled
+            # mid-flight. Drop the response without emitting.
+            if (
+                api_reg is not None
+                and entry is not None
+                and api_reg.get(correlation_id) is None
+            ):
+                logging.getLogger(__name__).info(
+                    "[widget] dropping late response for cancelled correlation %s on card %s",
+                    correlation_id,
+                    card_id,
+                )
+                return
+
             # Cap enforcement — measure the serialized result before emitting.
             serialized = json.dumps(payload_result, ensure_ascii=False)
             actual = len(serialized.encode("utf-8"))
@@ -2969,6 +2985,23 @@ def _spawn_widget_api_call_worker(
             if api_reg is not None:
                 api_reg.complete(correlation_id)
         except Exception as exc:
+            # If the correlation was registered at the start and is now
+            # gone, the exception is likely from interrupt(); drop silently.
+            late_sess = state.sessions.get(sid)
+            late_api_reg = (
+                late_sess.get("api_call_registry") if late_sess is not None else None
+            )
+            if (
+                late_api_reg is not None
+                and entry is not None
+                and late_api_reg.get(correlation_id) is None
+            ):
+                logging.getLogger(__name__).debug(
+                    "[widget] worker raised after cancel for %s: %s",
+                    correlation_id,
+                    exc,
+                )
+                return
             _emit_api_response_error(
                 sid,
                 correlation_id,
@@ -2976,9 +3009,8 @@ def _spawn_widget_api_call_worker(
                 ERROR_API_CALL_EXPIRED,
                 f"widget.api_call worker error: {exc}",
             )
-            late_sess = state.sessions.get(sid)
-            if late_sess is not None and late_sess.get("api_call_registry") is not None:
-                late_sess["api_call_registry"].complete(correlation_id)
+            if late_api_reg is not None:
+                late_api_reg.complete(correlation_id)
         finally:
             if session_tokens:
                 _clear_session_context(session_tokens)
