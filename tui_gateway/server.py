@@ -1418,8 +1418,11 @@ def _make_agent(sid: str, key: str, session_id: str | None = None):
 
 def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
     state = _state()
+    # Preserve client_capabilities if already stashed before this call.
+    existing = state.sessions.get(sid) or {}
     state.sessions[sid] = {
         "agent": agent,
+        "client_capabilities": existing.get("client_capabilities", []),
         "session_key": key,
         "history": history,
         "history_lock": threading.Lock(),
@@ -1563,11 +1566,13 @@ def _(rid, params: dict) -> dict:
     ready = threading.Event()
     state = _state()
 
+    caps = list(getattr(current_transport(), "client_capabilities", []) or [])
     state.sessions[sid] = {
         "agent": None,
         "agent_error": None,
         "agent_ready": ready,
         "attached_images": [],
+        "client_capabilities": caps,
         "cols": cols,
         "edit_snapshots": {},
         "history": [],
@@ -1603,9 +1608,20 @@ def _(rid, params: dict) -> dict:
         worker = None
         notify_registered = False
         try:
+            from tui_gateway.widget_runtime import (
+                set_widget_render_available,
+                reset_widget_render_available,
+            )
+
             tokens = _set_session_context(key)
             try:
-                agent = _make_agent(sid, key)
+                widget_token = set_widget_render_available(
+                    "widget.render" in caps
+                )
+                try:
+                    agent = _make_agent(sid, key)
+                finally:
+                    reset_widget_render_available(widget_token)
             finally:
                 _clear_session_context(tokens)
 
@@ -1757,15 +1773,32 @@ def _(rid, params: dict) -> dict:
     sid = uuid.uuid4().hex[:8]
     _enable_gateway_prompts()
     try:
+        from tui_gateway.widget_runtime import (
+            set_widget_render_available,
+            reset_widget_render_available,
+        )
+
+        resume_caps = list(
+            getattr(current_transport(), "client_capabilities", []) or []
+        )
         db.reopen_session(target)
         history = db.get_messages_as_conversation(target)
         messages = _history_to_messages(history)
         tokens = _set_session_context(target)
         try:
-            agent = _make_agent(sid, target, session_id=target)
+            widget_token = set_widget_render_available(
+                "widget.render" in resume_caps
+            )
+            try:
+                agent = _make_agent(sid, target, session_id=target)
+            finally:
+                reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
         _init_session(sid, target, agent, history, cols=int(params.get("cols", 80)))
+        state = _state()
+        if sid in state.sessions:
+            state.sessions[sid]["client_capabilities"] = resume_caps
     except Exception as e:
         return _err(rid, 5000, f"resume failed: {e}")
     return _ok(
@@ -1962,14 +1995,31 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5008, f"branch failed: {e}")
     new_sid = uuid.uuid4().hex[:8]
     try:
+        from tui_gateway.widget_runtime import (
+            set_widget_render_available,
+            reset_widget_render_available,
+        )
+
+        branch_caps = list(
+            getattr(current_transport(), "client_capabilities", []) or []
+        )
         tokens = _set_session_context(new_key)
         try:
-            agent = _make_agent(new_sid, new_key, session_id=new_key)
+            widget_token = set_widget_render_available(
+                "widget.render" in branch_caps
+            )
+            try:
+                agent = _make_agent(new_sid, new_key, session_id=new_key)
+            finally:
+                reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
         _init_session(
             new_sid, new_key, agent, list(history), cols=session.get("cols", 80)
         )
+        branch_state = _state()
+        if new_sid in branch_state.sessions:
+            branch_state.sessions[new_sid]["client_capabilities"] = branch_caps
     except Exception as e:
         return _err(rid, 5000, f"agent init failed on branch: {e}")
     return _ok(rid, {"session_id": new_sid, "title": title, "parent": old_key})
