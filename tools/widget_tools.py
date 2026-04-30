@@ -22,6 +22,13 @@ import json
 from typing import Any, Optional
 
 from tools.registry import registry
+from tui_gateway.widget_constants import (
+    ERROR_CLIENT_REFUSED_MOUNT,
+    ERROR_MESSAGE_TOO_LARGE,
+    ERROR_RENDER_TIMED_OUT,
+    ERROR_SOURCE_TOO_LARGE,
+    ERROR_UNKNOWN_CAPABILITY,
+)
 from tui_gateway.widget_runtime import is_widget_render_available, WidgetRegistry
 
 
@@ -234,10 +241,10 @@ def _render_widget(args: dict, **kwargs: Any) -> str:
     initial_size = args.get("initial_size")
 
     if len(source.encode("utf-8")) > SOURCE_BYTE_CAP:
-        return _err(4102, f"source exceeds {SOURCE_BYTE_CAP} bytes")
+        return _err(ERROR_SOURCE_TOO_LARGE, f"source exceeds {SOURCE_BYTE_CAP} bytes")
     unknown = [c for c in capabilities if c not in ALLOWED_CAPABILITIES]
     if unknown:
-        return _err(4101, f"unknown capabilities: {unknown}")
+        return _err(ERROR_UNKNOWN_CAPABILITY, f"unknown capabilities: {unknown}")
 
     reg: WidgetRegistry = sess["widget_registry"]
     card_id = reg.allocate(
@@ -274,7 +281,7 @@ def _render_widget(args: dict, **kwargs: Any) -> str:
         )
     if status == "error":
         return _err(
-            5101,
+            ERROR_CLIENT_REFUSED_MOUNT,
             info.get("message", "client refused to mount"),
             phase=info.get("phase", "compile"),
             kind=info.get("kind", "unknown"),
@@ -282,7 +289,7 @@ def _render_widget(args: dict, **kwargs: Any) -> str:
         )
     # timeout
     return _err(
-        5102,
+        ERROR_RENDER_TIMED_OUT,
         f"render_widget timed out after {RENDER_TIMEOUT_S}s waiting for widget.mounted",
         card_id=card_id,
     )
@@ -305,11 +312,11 @@ def _widget_update(args: dict, **kwargs: Any) -> str:
     capabilities = args.get("capabilities")
 
     if len(source.encode("utf-8")) > SOURCE_BYTE_CAP:
-        return _err(4102, f"source exceeds {SOURCE_BYTE_CAP} bytes")
+        return _err(ERROR_SOURCE_TOO_LARGE, f"source exceeds {SOURCE_BYTE_CAP} bytes")
     if capabilities is not None:
         unknown = [c for c in capabilities if c not in ALLOWED_CAPABILITIES]
         if unknown:
-            return _err(4101, f"unknown capabilities: {unknown}")
+            return _err(ERROR_UNKNOWN_CAPABILITY, f"unknown capabilities: {unknown}")
 
     reg: WidgetRegistry = sess["widget_registry"]
     updated, gone = reg.update_source(card_id, source=source, capabilities=capabilities)
@@ -339,7 +346,7 @@ def _widget_message(args: dict, **kwargs: Any) -> str:
         return _err(4012, "payload required")
     serialized = json.dumps(payload, ensure_ascii=False)
     if len(serialized.encode("utf-8")) > MESSAGE_BYTE_CAP:
-        return _err(4107, f"widget.message payload exceeds {MESSAGE_BYTE_CAP} bytes")
+        return _err(ERROR_MESSAGE_TOO_LARGE, f"widget.message payload exceeds {MESSAGE_BYTE_CAP} bytes")
 
     reg: WidgetRegistry = sess["widget_registry"]
     entry = reg.get(card_id)
