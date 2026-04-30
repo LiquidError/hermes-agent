@@ -97,6 +97,25 @@ def _check() -> bool:
     return is_widget_render_available()
 
 
+def _current_session_key(kwargs: dict) -> str:
+    """Resolve the active session_key for a widget tool call.
+
+    Production path: the tui_gateway dispatcher binds HERMES_SESSION_KEY
+    via gateway.session_context.set_session_vars before agent.run_conversation.
+    The widget tool runs inside the agent loop on that thread, so the
+    contextvar is in scope.
+
+    Test path: callers pass session_id=key directly to the handler — we
+    accept that as an override so unit tests don't need to bind the
+    contextvar themselves.
+    """
+    direct = (kwargs.get("session_id") or "").strip()
+    if direct:
+        return direct
+    from gateway.session_context import get_session_env
+    return get_session_env("HERMES_SESSION_KEY", "")
+
+
 def _resolve_session(session_key: str) -> Optional[tuple[str, dict]]:
     """Map session_key (HERMES_SESSION_KEY) → (sid, session_dict).
 
@@ -256,7 +275,7 @@ READ_WIDGET_EXAMPLE_SCHEMA = {
 
 
 def _render_widget(args: dict, **kwargs: Any) -> str:
-    session_key = kwargs.get("session_id", "") or ""
+    session_key = _current_session_key(kwargs)
     resolved = _resolve_session(session_key)
     if resolved is None:
         return _err(4001, "session not found")
@@ -328,7 +347,7 @@ def _render_widget(args: dict, **kwargs: Any) -> str:
 
 
 def _widget_update(args: dict, **kwargs: Any) -> str:
-    session_key = kwargs.get("session_id", "") or ""
+    session_key = _current_session_key(kwargs)
     resolved = _resolve_session(session_key)
     if resolved is None:
         return _err(4001, "session not found")
@@ -361,7 +380,7 @@ def _widget_update(args: dict, **kwargs: Any) -> str:
 
 
 def _widget_message(args: dict, **kwargs: Any) -> str:
-    session_key = kwargs.get("session_id", "") or ""
+    session_key = _current_session_key(kwargs)
     resolved = _resolve_session(session_key)
     if resolved is None:
         return _err(4001, "session not found")
@@ -394,7 +413,7 @@ def _widget_message(args: dict, **kwargs: Any) -> str:
 
 
 def _widget_dispose(args: dict, **kwargs: Any) -> str:
-    session_key = kwargs.get("session_id", "") or ""
+    session_key = _current_session_key(kwargs)
     resolved = _resolve_session(session_key)
     if resolved is None:
         return _err(4001, "session not found")
@@ -504,12 +523,61 @@ def _handler_for(name: str):
     }.get(name) or (lambda args, _tname=name, **kw: _stub(_tname))
 
 
-for _name, _schema in _REGISTRATIONS:
-    registry.register(
-        name=_name,
-        toolset="widget",
-        schema=_schema,
-        handler=_handler_for(_name),
-        check_fn=_check,
-        emoji="🪟",
-    )
+# Top-level explicit registrations (one per tool) so the AST-based
+# discovery scanner in tools/registry.py:_module_registers_tools picks
+# up this module without requiring an external import. A `for` loop body
+# is not visible to the scanner; only top-level Expr(Call(...)) is.
+
+registry.register(
+    name="render_widget",
+    toolset="widget",
+    schema=RENDER_WIDGET_SCHEMA,
+    handler=_render_widget,
+    check_fn=_check,
+    emoji="🪟",
+)
+
+registry.register(
+    name="widget_update",
+    toolset="widget",
+    schema=WIDGET_UPDATE_SCHEMA,
+    handler=_widget_update,
+    check_fn=_check,
+    emoji="🪟",
+)
+
+registry.register(
+    name="widget_message",
+    toolset="widget",
+    schema=WIDGET_MESSAGE_SCHEMA,
+    handler=_widget_message,
+    check_fn=_check,
+    emoji="🪟",
+)
+
+registry.register(
+    name="widget_dispose",
+    toolset="widget",
+    schema=WIDGET_DISPOSE_SCHEMA,
+    handler=_widget_dispose,
+    check_fn=_check,
+    emoji="🪟",
+)
+
+registry.register(
+    name="list_widget_examples",
+    toolset="widget",
+    schema=LIST_WIDGET_EXAMPLES_SCHEMA,
+    handler=_list_widget_examples,
+    check_fn=_check,
+    emoji="🪟",
+)
+
+registry.register(
+    name="read_widget_example",
+    toolset="widget",
+    schema=READ_WIDGET_EXAMPLE_SCHEMA,
+    handler=_read_widget_example,
+    check_fn=_check,
+    emoji="🪟",
+)
