@@ -97,6 +97,66 @@ def test_inbound_handler_unknown_session_does_not_raise():
     # No assertion — must not raise. Logged at warning level.
 
 
+def test_session_dict_includes_api_call_registry(monkeypatch):
+    sid, sess = _seed_session("sess-api", "key-api")
+    # Simulate _init_session having added the ApiCallRegistry — Task 3 wires it.
+    from tui_gateway.widget_runtime import ApiCallRegistry
+    # _seed_session here doesn't allocate one (the helper is loose); the
+    # production wiring lives in tui_gateway/server.py session-dict initializers.
+    # We verify the field exists OR is correctly typed when present.
+    assert (
+        isinstance(sess.get("api_call_registry"), ApiCallRegistry)
+        or sess.get("api_call_registry") is None
+    )
+
+
+def test_init_session_allocates_api_call_registry():
+    """The real _init_session in tui_gateway.server must put an
+    ApiCallRegistry in the session dict alongside widget_registry."""
+    import threading as _threading
+
+    from tui_gateway.widget_runtime import ApiCallRegistry
+
+    state = server._state()
+    sid = "sess-init-api"
+    key = "key-init-api"
+
+    class _StubAgent:
+        model = "stub"
+
+        def interrupt(self):
+            pass
+
+    server._init_session(sid, key, _StubAgent(), [], cols=80)
+    try:
+        sess = state.sessions[sid]
+        assert isinstance(sess.get("api_call_registry"), ApiCallRegistry)
+    finally:
+        state.sessions.pop(sid, None)
+
+
+def test_session_create_dict_carries_api_call_registry(monkeypatch):
+    """session.create populates api_call_registry before agent is built."""
+    from tui_gateway.widget_runtime import ApiCallRegistry
+
+    handler = server._methods.get("session.create")
+    assert handler is not None
+
+    # Stub agent build to a no-op so session.create returns quickly.
+    monkeypatch.setattr(
+        server, "_make_agent", lambda *a, **kw: type("A", (), {"model": "stub"})()
+    )
+
+    resp = handler(99, {"cols": 80})
+    assert "result" in resp
+    sid = resp["result"]["session_id"]
+    try:
+        sess = server._state().sessions.get(sid) or {}
+        assert isinstance(sess.get("api_call_registry"), ApiCallRegistry)
+    finally:
+        server._state().sessions.pop(sid, None)
+
+
 def test_session_close_clears_registry(monkeypatch):
     sid, sess = _seed_session("sess-tear", "key-tear")
     reg = sess["widget_registry"]

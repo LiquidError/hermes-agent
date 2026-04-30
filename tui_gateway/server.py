@@ -27,7 +27,10 @@ from tui_gateway.transport import (
     current_transport,
     reset_transport,
 )
-from tui_gateway.widget_runtime import WidgetRegistry as _WidgetRegistry
+from tui_gateway.widget_runtime import (
+    ApiCallRegistry as _ApiCallRegistry,
+    WidgetRegistry as _WidgetRegistry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1483,6 +1486,7 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         # session (stdio for Ink, JSON-RPC WS for the dashboard sidebar).
         "transport": current_transport() or _stdio_transport,
         "widget_registry": existing.get("widget_registry") or _WidgetRegistry(),
+        "api_call_registry": existing.get("api_call_registry") or _ApiCallRegistry(),
     }
     _register_session(sid)
     try:
@@ -1631,6 +1635,7 @@ def _(rid, params: dict) -> dict:
         "tool_started_at": {},
         "transport": current_transport() or _stdio_transport,
         "widget_registry": _WidgetRegistry(),
+        "api_call_registry": _ApiCallRegistry(),
     }
     _register_session(sid)
 
