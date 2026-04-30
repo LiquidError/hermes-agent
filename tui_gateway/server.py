@@ -477,6 +477,24 @@ def method(name: str):
     return dec
 
 
+_event_handlers: dict[str, callable] = {}
+
+
+def event_handler(name: str):
+    """Register a handler for inbound client → server event-shape messages.
+
+    Handler signature: ``handler(params: dict) -> None``. ``params`` is
+    the full ``params`` field of the event message — typically containing
+    ``type``, ``session_id``, and ``payload``.
+    """
+
+    def dec(fn):
+        _event_handlers[name] = fn
+        return fn
+
+    return dec
+
+
 def handle_request(req: dict) -> dict | None:
     fn = _methods.get(req.get("method", ""))
     if not fn:
@@ -499,6 +517,21 @@ def dispatch(req: dict, transport: Optional[Transport] = None) -> dict | None:
     t = transport or _stdio_transport
     token = bind_transport(t)
     try:
+        # Inbound client → server events have no id and need no response.
+        # Route them to typed-event handlers; drop unknown event types
+        # silently rather than producing a -32601.
+        if req.get("method") == "event":
+            params = req.get("params") or {}
+            handler = _event_handlers.get(params.get("type", ""))
+            if handler is not None:
+                try:
+                    handler(params)
+                except Exception as exc:
+                    logger.warning(
+                        "event handler %s raised: %s", params.get("type"), exc
+                    )
+            return None
+
         if req.get("method") not in _LONG_HANDLERS:
             return handle_request(req)
 
