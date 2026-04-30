@@ -18,7 +18,6 @@ moment Plan 01 ships.
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from tools.registry import registry
 from tui_gateway.widget_runtime import is_widget_render_available

@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from tools import widget_tools  # noqa: F401  triggers registration
 from tools.registry import registry
 from tui_gateway import widget_runtime
