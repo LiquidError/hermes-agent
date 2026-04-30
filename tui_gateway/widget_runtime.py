@@ -248,6 +248,16 @@ def _registry_for(session_id: str) -> Optional["WidgetRegistry"]:
     return sess.get("widget_registry")
 
 
+def _state_for_session_safe(sid: str):
+    """Return the sessions dict for a session id, or None if not registered."""
+    from tui_gateway.server import _state_for_session
+
+    if not sid:
+        return None
+    state = _state_for_session(sid)
+    return state.sessions if state is not None else None
+
+
 def _register_inbound_event_handlers() -> None:
     """Wire the three inbound widget.* events into tui_gateway.server.
 
@@ -295,3 +305,26 @@ def _register_inbound_event_handlers() -> None:
             payload.get("card_id", ""),
             reason=str(payload.get("reason", "user_closed")),
         )
+
+    @event_handler("widget.api_cancel")
+    def _on_api_cancel(params: dict) -> None:
+        sid = params.get("session_id", "")
+        payload = params.get("payload") or {}
+        correlation_id = str(payload.get("correlation_id", "") or "")
+        reason = str(payload.get("reason", "user_cancelled") or "user_cancelled")
+
+        sessions = _state_for_session_safe(sid)
+        sess = (sessions or {}).get(sid) if sessions else None
+        if not sess:
+            return
+        api_reg = sess.get("api_call_registry")
+        if api_reg is None:
+            return
+
+        entry = api_reg.cancel(correlation_id, reason=reason)
+        if entry is not None and entry.agent_ref is not None:
+            try:
+                entry.agent_ref.interrupt()
+            except Exception:
+                # Best-effort. Worker continues; drop-on-arrival catches it.
+                pass
