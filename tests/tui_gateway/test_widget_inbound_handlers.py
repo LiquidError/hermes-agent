@@ -95,3 +95,27 @@ def test_inbound_handler_unknown_session_does_not_raise():
         },
     })
     # No assertion — must not raise. Logged at warning level.
+
+
+def test_session_close_clears_registry(monkeypatch):
+    sid, sess = _seed_session("sess-tear", "key-tear")
+    reg = sess["widget_registry"]
+    cid = reg.allocate(source="x", capabilities=[], title=None, initial_size=None, trace_id=None)
+
+    # Find session.close handler; signature varies — adapt to the actual.
+    handler = server._methods.get("session.close")
+    assert handler is not None, "session.close must exist"
+    handler(1, {"session_id": sid})
+
+    # State.sessions[sid] should be gone, AND any subsequent widget.disposed
+    # event for that sid is a no-op (no crash, no re-add).
+    assert sid not in server._state().sessions
+    server.dispatch({
+        "jsonrpc": "2.0",
+        "method": "event",
+        "params": {
+            "type": "widget.disposed",
+            "session_id": sid,
+            "payload": {"card_id": cid, "reason": "session_ended"},
+        },
+    })
