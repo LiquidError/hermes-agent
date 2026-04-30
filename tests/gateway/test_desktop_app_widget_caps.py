@@ -11,13 +11,23 @@ from gateway.platforms.desktop_app import _register_client_hello
 
 @pytest.fixture(autouse=True)
 def _reset_handler(monkeypatch):
-    """Force a fresh registration so each test sees the latest handler body."""
+    """Force a fresh registration so each test sees the latest handler body.
+
+    Captures the original handler before the test (if any) and restores it
+    after, so the methods dict does not leak modified state across tests in
+    the same xdist worker.
+    """
     from gateway.platforms import desktop_app
     from tui_gateway import server as tg_server
 
+    original_handler = tg_server._methods.get("client.hello")
     monkeypatch.setattr(desktop_app, "_HELLO_REGISTERED", False)
     tg_server._methods.pop("client.hello", None)
     yield
+    if original_handler is None:
+        tg_server._methods.pop("client.hello", None)
+    else:
+        tg_server._methods["client.hello"] = original_handler
 
 
 def test_server_advertises_widget_render():
