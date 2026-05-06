@@ -23,6 +23,8 @@ This starts a local web server and opens `http://127.0.0.1:9119` in your browser
 | `--port` | `9119` | Port to run the web server on |
 | `--host` | `127.0.0.1` | Bind address |
 | `--no-open` | — | Don't auto-open the browser |
+| `--insecure` | off | Allow binding to non-localhost hosts (**DANGEROUS** — exposes API keys on the network; pair with a firewall and strong auth) |
+| `--tui` | off | Expose the in-browser Chat tab (embedded `hermes --tui` via PTY/WebSocket). Alternatively set `HERMES_DASHBOARD_TUI=1`. |
 
 ```bash
 # Custom port
@@ -342,6 +344,6 @@ To build your own theme, add a plugin tab, inject into shell slots, or expose pl
 
 - Theme YAML schema — palette, typography, layout, assets, componentStyles, colorOverrides, customCSS
 - Layout variants — `standard`, `cockpit`, `tiled`
-- Plugin manifest, SDK, shell slots, backend FastAPI routes
+- Plugin manifest, SDK, shell slots, page-scoped slots (inject widgets into built-in pages without overriding them), backend FastAPI routes
 - A full combined theme-plus-plugin walkthrough (Strike Freedom cockpit demo)
 - Discovery, reload, and troubleshooting
