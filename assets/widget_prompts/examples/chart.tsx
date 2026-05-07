@@ -1,47 +1,62 @@
 /**
- * Chart over agent-supplied data, refreshed via widget.message.
+ * Bar/line/pie chart driven by agent-pushed data via widget.message.
  *
- * Pattern: data-driven, agent-pushed updates. The card renders a chart of
- * whatever data the agent pushes via widget_message. Good for dashboards,
- * comparisons, time series, and any case where the agent has already
- * computed a structured dataset and just needs to display it.
+ * Pattern: data-driven, agent-pushed updates. The card subscribes to
+ * `canvasAPI.onMessage` and re-renders whenever the agent pushes a structured
+ * dataset via `widget_message`. Good for dashboards, time-series, comparison
+ * snapshots — anywhere the agent has already computed the rows and just
+ * needs them displayed.
+ *
+ * `<Chart>` lives in `canvas-primitives/heavy` (lazy-loaded chunk). React
+ * requires the consumer to wrap lazy components in `<Suspense>`; the agent
+ * ships a fallback that reads as "loading…" while the chunk fetches. The
+ * chunk is cached for the mount, so subsequent re-renders are zero-cost.
  *
  * Capabilities: [] (the agent pushes data via widget_message; the card
  *                  doesn't need to call back)
- * Imports: React (with hooks); Card, Chart from 'canvas-primitives';
+ * Imports: React (with hooks + Suspense); Card from 'canvas-primitives';
+ *          Chart from 'canvas-primitives/heavy';
  *          canvasAPI.onMessage for receiving structured pushes.
  */
 
-import React, { useEffect, useState } from 'react';
-import { Card, Chart, Text } from 'canvas-primitives';
+import React, { Suspense, useEffect, useState } from 'react';
+import { Card } from 'canvas-primitives';
+import { Chart, type ChartKind } from 'canvas-primitives/heavy';
 
 declare const canvasAPI: {
   onMessage(handler: (msg: unknown) => void): () => void;
 };
 
-type DataPoint = { label: string; value: number };
+type DataPoint = { name: string; value: number };
 
-export default function DataChart() {
+export default function DataSnapshot() {
   const [data, setData] = useState<DataPoint[]>([]);
-  const [title, setTitle] = useState<string>('Chart');
+  const [kind, setKind] = useState<ChartKind>('bar');
+  const [title, setTitle] = useState<string>('Snapshot');
 
   useEffect(() => {
     return canvasAPI.onMessage((msg) => {
-      const m = msg as { kind?: string; data?: DataPoint[]; title?: string };
+      const m = msg as {
+        kind?: string;
+        chart_kind?: ChartKind;
+        data?: DataPoint[];
+        title?: string;
+      };
       if (m.kind === 'data.refresh' && Array.isArray(m.data)) {
         setData(m.data);
         if (typeof m.title === 'string') setTitle(m.title);
+        if (m.chart_kind === 'bar' || m.chart_kind === 'line' || m.chart_kind === 'pie') {
+          setKind(m.chart_kind);
+        }
       }
     });
   }, []);
 
-  if (data.length === 0) {
-    return <Card title={title}><Text muted>Awaiting data…</Text></Card>;
-  }
-
   return (
     <Card title={title}>
-      <Chart data={data} kind="bar" />
+      <Suspense fallback={<div style={{ height: 200 }}>Loading chart…</div>}>
+        <Chart data={data} kind={kind} />
+      </Suspense>
     </Card>
   );
 }

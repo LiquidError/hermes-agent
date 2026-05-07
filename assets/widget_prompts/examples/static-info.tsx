@@ -15,11 +15,11 @@ import { Card, Stack, Text, Field } from 'canvas-primitives';
 export default function StaticInfoCard() {
   return (
     <Card title="Quarterly summary">
-      <Stack gap={12}>
-        <Field label="Quarter">Q3 2025</Field>
-        <Field label="Revenue">$4.2M</Field>
-        <Field label="Growth">+18% YoY</Field>
-        <Text muted>
+      <Stack gap={3}>
+        <Field label="Quarter"><Text>Q3 2025</Text></Field>
+        <Field label="Revenue"><Text>$4.2M</Text></Field>
+        <Field label="Growth"><Text>+18% YoY</Text></Field>
+        <Text variant="muted">
           Generated from the closing financial pack on 2025-10-15.
         </Text>
       </Stack>

@@ -26,7 +26,8 @@ Call `list_widget_examples()` to see the patterns available, then `read_widget_e
 ## Lifecycle
 
 - `render_widget` returns a `card_id` string. Store it; pass it to `widget_update`, `widget_message`, or `widget_dispose` on later turns.
+- **Cards persist on the canvas after `render_widget` returns.** They stay mounted until the user closes the card or you call `widget_dispose`. Do NOT call `widget_dispose` in the same turn you rendered — the card has just appeared and the user wants to see and use it.
 - Prefer `widget_update` over disposing and re-rendering when fixing a bug or improving a design — it preserves position and feels less jarring.
 - Use `widget_message` for incremental data updates the card can absorb without remount.
-- Dispose explicitly when the task that motivated the card is done — don't leak cards across topics.
+- Only dispose when (a) the user explicitly asks you to dismiss the card, (b) the conversation has clearly moved to an unrelated topic and a stale card would be visual clutter, or (c) you are about to render a fresh card that supersedes this one and you decide not to use `widget_update`. "I finished generating the source" is not a reason to dispose.
 - If `widget_update` or `widget_dispose` returns `card_gone: true` or `already_disposed: true`, the user closed the card. Treat that as user signal, not error.

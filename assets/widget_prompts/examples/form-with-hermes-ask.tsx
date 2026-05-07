@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Card, Field, Button, Stack, Text } from 'canvas-primitives';
+import { Card, Field, Button, Stack, Row, Text } from 'canvas-primitives';
 
 declare const canvasAPI: {
   hermes: { ask(prompt: string): Promise<string> };
@@ -49,20 +49,20 @@ export default function RetroForm() {
 
   return (
     <Card title="Q3 retro">
-      <Stack gap={12}>
+      <Stack gap={3}>
         <Field label="Wins">
           <textarea value={wins} onChange={(e) => setWins(e.target.value)} rows={6} />
         </Field>
         <Field label="Misses">
           <textarea value={misses} onChange={(e) => setMisses(e.target.value)} rows={6} />
         </Field>
-        <Stack gap={8} direction="row">
+        <Row gap={2}>
           <Button onClick={fillFromAgent} disabled={busy}>
             {busy ? 'Asking…' : 'Fill from agent'}
           </Button>
-          <Button onClick={save} primary>Save as note</Button>
-        </Stack>
-        {busy && <Text muted>Hermes is thinking…</Text>}
+          <Button onClick={save} variant="primary">Save as note</Button>
+        </Row>
+        {busy && <Text variant="muted">Hermes is thinking…</Text>}
       </Stack>
     </Card>
   );

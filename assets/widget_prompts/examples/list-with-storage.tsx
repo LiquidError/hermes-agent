@@ -47,15 +47,15 @@ export default function TrackerCard() {
 
   const remove = (i: number) => persist(items.filter((_, j) => j !== i));
 
-  if (!hydrated) return <Card title="Tracker"><Text muted>Loading…</Text></Card>;
+  if (!hydrated) return <Card title="Tracker"><Text variant="muted">Loading…</Text></Card>;
 
   return (
     <Card title="Tracker">
-      <Stack gap={8}>
+      <Stack gap={2}>
         {items.map((item, i) => (
           <Row key={i}>
             <Text>{item}</Text>
-            <Button onClick={() => remove(i)} subtle>Remove</Button>
+            <Button onClick={() => remove(i)} variant="ghost">Remove</Button>
           </Row>
         ))}
         <Row>
