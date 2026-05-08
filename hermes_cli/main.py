@@ -8420,16 +8420,20 @@ def cmd_dashboard(args):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
             sys.exit(1)
 
-    from hermes_cli.web_server import start_server
+    from hermes_cli.web_server import BindRefused, start_server
 
     embedded_chat = args.tui or os.environ.get("HERMES_DASHBOARD_TUI") == "1"
-    start_server(
-        host=args.host,
-        port=args.port,
-        open_browser=not args.no_open,
-        allow_public=getattr(args, "insecure", False),
-        embedded_chat=embedded_chat,
-    )
+    try:
+        start_server(
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_open,
+            allow_public=getattr(args, "insecure", False),
+            embedded_chat=embedded_chat,
+        )
+    except BindRefused as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_completion(args, parser=None):

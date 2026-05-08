@@ -449,6 +449,50 @@ def tmp_dir(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def fake_cert_pair(tmp_path):
+    """Generate a throwaway self-signed cert pair under ``tmp_path``.
+
+    Returns ``(cert_path, key_path)`` for tests that need real cert files
+    on disk (TLS load, ``HERMES_TLS_CERT``/``HERMES_TLS_KEY`` env wiring,
+    bind-guard tests). Skips the test if ``cryptography`` is unavailable.
+
+    Shared across ``tests/hermes_cli/`` (dashboard TLS) and
+    ``tests/gateway/`` (api_server TLS) since both surfaces load the
+    same cert pair via ``hermes_cli.tls_loader``.
+    """
+    pytest.importorskip("cryptography")
+    from datetime import datetime, timedelta, timezone
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.ts.net")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(timezone.utc))
+        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=90))
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = tmp_path / "test.ts.net.crt"
+    key_path = tmp_path / "test.ts.net.key"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return cert_path, key_path
+
+
 @pytest.fixture()
 def mock_config():
     """Return a minimal hermes config dict suitable for unit tests."""

@@ -32,8 +32,10 @@ import os
 import socket as _socket
 import re
 import sqlite3
+import ssl
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
@@ -3082,7 +3084,7 @@ class APIServerAdapter(BasePlatformAdapter):
             if is_network_accessible(self._host) and not self._api_key:
                 logger.error(
                     "[%s] Refusing to start: binding to %s requires API_SERVER_KEY. "
-                    "Set API_SERVER_KEY or use the default 127.0.0.1.",
+                    "Set API_SERVER_KEY (e.g. `openssl rand -hex 32`) or use the default 127.0.0.1.",
                     self.name, self._host,
                 )
                 return False
@@ -3116,7 +3118,35 @@ class APIServerAdapter(BasePlatformAdapter):
 
             self._runner = web.AppRunner(self._app)
             await self._runner.setup()
-            self._site = web.TCPSite(self._runner, self._host, self._port)
+
+            # TLS termination — same loader, same files as the dashboard.
+            # See hermes_cli/tls_loader.py. ssl_context stays None when env
+            # vars are unset, preserving the plaintext default.
+            ssl_context = None
+            cert_env = os.environ.get("HERMES_TLS_CERT")
+            key_env = os.environ.get("HERMES_TLS_KEY")
+            if cert_env and key_env:
+                try:
+                    from hermes_cli.tls_loader import expiry_warning, load
+                    tls_ctx = load(Path(cert_env), Path(key_env))
+                    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                    ssl_context.load_cert_chain(
+                        certfile=str(tls_ctx.cert_path),
+                        keyfile=str(tls_ctx.key_path),
+                    )
+                    warn = expiry_warning(tls_ctx)
+                    if warn:
+                        logger.warning("[%s] %s", self.name, warn)
+                except (FileNotFoundError, OSError, ssl.SSLError) as e:
+                    logger.warning(
+                        "[%s] TLS load failed: %s — starting plaintext",
+                        self.name, e,
+                    )
+                    ssl_context = None
+
+            self._site = web.TCPSite(
+                self._runner, self._host, self._port, ssl_context=ssl_context
+            )
             await self._site.start()
 
             self._mark_connected()
@@ -3128,9 +3158,10 @@ class APIServerAdapter(BasePlatformAdapter):
                     "unauthorized access to sessions, responses, and cron jobs.",
                     self.name,
                 )
+            scheme = "https" if ssl_context is not None else "http"
             logger.info(
-                "[%s] API server listening on http://%s:%d (model: %s)",
-                self.name, self._host, self._port, self._model_name,
+                "[%s] API server listening on %s://%s:%d (model: %s)",
+                self.name, scheme, self._host, self._port, self._model_name,
             )
             return True
 
