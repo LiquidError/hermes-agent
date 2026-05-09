@@ -19,19 +19,15 @@
     return tier ? "ha-tier-" + tier.toLowerCase() : "ha-tier-pending";
   };
 
+  // hermes-agent fork: route requests through SDK.fetchJSON so the dashboard's
+  // session token (X-Hermes-Session-Token header) gets attached. Raw fetch()
+  // worked pre-fork because plugin routes were exempt from the auth
+  // middleware; the dashboard fork closes that exemption, so plugin requests
+  // now require the same bearer the rest of the SPA presents.
+  // Upstream this in PCinkusz/hermes-achievements when convenient.
   async function api(path, options) {
     const url = "/api/plugins/hermes-achievements" + path;
-    const res = await fetch(url, options || {});
-    if (!res.ok) {
-      const text = await res.text().catch(function () { return res.statusText; });
-      throw new Error(res.status + ": " + text);
-    }
-    const text = await res.text();
-    try {
-      return JSON.parse(text);
-    } catch (_) {
-      return null;
-    }
+    return SDK.fetchJSON(url, options || {});
   }
 
   function AchievementIcon({ icon }) {
