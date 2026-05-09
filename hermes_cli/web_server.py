@@ -119,28 +119,47 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
 })
 
 
+def _is_strict_off_loopback(app_state) -> bool:
+    """True when the dashboard should enforce strict off-loopback semantics.
+
+    "Strict" means: every path requires a valid bearer (no SPA bootstrap
+    exemption, no `/docs` exemption), and the ephemeral session token is
+    rejected because the SPA HTML carrying it would leak on the network.
+
+    Returns False when ``HERMES_ALLOW_INSECURE_BIND=1`` (or ``--insecure``)
+    is set — the operator has explicitly opted into "treat this bind like
+    loopback even though it's network-facing", which makes the SPA flow
+    work and accepts the ephemeral token. Bind guard already warns loudly
+    on every request in that mode.
+    """
+    bound_host = getattr(app_state, "bound_host", None) or "127.0.0.1"
+    if getattr(app_state, "allow_insecure", False):
+        return False
+    try:
+        from gateway.platforms.base import is_network_accessible
+        return is_network_accessible(bound_host)
+    except ImportError:
+        # Fail closed: when we can't classify the bind, gate everything.
+        return True
+
+
 def _has_valid_session_token(request: Request) -> bool:
     """True if the request carries a valid bearer token under the current bind policy.
 
-    Loopback bind: accept either the ephemeral ``_SESSION_TOKEN`` (used by the
-    SPA) or ``API_SERVER_KEY`` when set (used by remote clients pointed at
-    localhost during development).
+    Strict off-loopback bind: accept ``API_SERVER_KEY`` only. The ephemeral
+    token is rejected because it is injected into the locally-served SPA and
+    would leak via ``GET /``.
 
-    Non-loopback bind: accept ``API_SERVER_KEY`` only. The ephemeral token is
-    rejected because it is injected into the locally-served SPA and would
-    leak via ``GET /``.
+    Loopback bind (or off-loopback with ``--insecure``/``HERMES_ALLOW_INSECURE_BIND=1``):
+    accept either the ephemeral ``_SESSION_TOKEN`` (used by the SPA) or
+    ``API_SERVER_KEY`` when set. The insecure-bind path is the operator's
+    explicit "trust this LAN" opt-in; it restores the pre-strict-mode SPA
+    flow on a network-facing bind.
 
     DNS rebinding is defended upstream by ``host_header_middleware``; this
     function enforces token-class policy only.
     """
-    bound_host = getattr(request.app.state, "bound_host", None) or "127.0.0.1"
-    try:
-        from gateway.platforms.base import is_network_accessible
-        off_loopback = is_network_accessible(bound_host)
-    except ImportError:
-        # Fail closed: if we can't determine the bind, assume off-loopback
-        # and reject every token path except API_SERVER_KEY.
-        off_loopback = True
+    strict = _is_strict_off_loopback(request.app.state)
 
     api_key = os.environ.get("API_SERVER_KEY", "")
 
@@ -151,16 +170,16 @@ def _has_valid_session_token(request: Request) -> bool:
         presented = ""
     session_header = request.headers.get(_SESSION_HEADER_NAME, "")
 
-    # API_SERVER_KEY path — works on both loopback and off-loopback.
+    # API_SERVER_KEY path — works under any bind classification.
     if api_key and presented and hmac.compare_digest(presented.encode(), api_key.encode()):
         return True
 
-    if off_loopback:
-        # Off-loopback rejects every other token path. Including the SPA's
-        # ephemeral token (which would leak via the served HTML).
+    if strict:
+        # Strict off-loopback rejects every other token path. Including the
+        # SPA's ephemeral token (which would leak via the served HTML).
         return False
 
-    # Loopback fallback: ephemeral session token in either header.
+    # Lenient (loopback or --insecure): ephemeral session token in either header.
     if session_header and hmac.compare_digest(session_header.encode(), _SESSION_TOKEN.encode()):
         return True
     if presented and hmac.compare_digest(presented.encode(), _SESSION_TOKEN.encode()):
@@ -194,20 +213,14 @@ def _ws_token_valid(websocket: "WebSocket", presented: str) -> bool:
     """Bind-aware token check for WebSocket upgrades.
 
     Mirrors :func:`_has_valid_session_token`, which takes a ``Request``:
-    accepts ``API_SERVER_KEY`` on any bind, falls back to the ephemeral
-    session token only on loopback.
+    accepts ``API_SERVER_KEY`` under any bind, falls back to the ephemeral
+    session token on loopback (or on off-loopback with ``--insecure``).
     """
-    bound_host = getattr(websocket.app.state, "bound_host", None) or "127.0.0.1"
-    try:
-        from gateway.platforms.base import is_network_accessible
-        off_loopback = is_network_accessible(bound_host)
-    except ImportError:
-        # Fail closed if we can't classify the bind.
-        off_loopback = True
+    strict = _is_strict_off_loopback(websocket.app.state)
     api_key = os.environ.get("API_SERVER_KEY", "")
     if api_key and presented and hmac.compare_digest(presented.encode(), api_key.encode()):
         return True
-    if off_loopback:
+    if strict:
         return False
     return bool(presented) and hmac.compare_digest(presented.encode(), _SESSION_TOKEN.encode())
 
@@ -436,27 +449,22 @@ async def auth_middleware(request: Request, call_next):
     which always presents a bearer. Browser-SPA-over-network is not a
     supported use case (use loopback, or tunnel loopback over Tailscale).
     """
-    bound_host = getattr(request.app.state, "bound_host", None) or "127.0.0.1"
-    try:
-        from gateway.platforms.base import is_network_accessible
-        off_loopback = is_network_accessible(bound_host)
-    except ImportError:
-        # Fail closed: when we can't classify the bind, gate everything.
-        off_loopback = True
-
+    strict = _is_strict_off_loopback(request.app.state)
     path = request.url.path
 
-    if off_loopback:
-        # Strict mode: every path requires a valid bearer.
+    if strict:
+        # Strict off-loopback: every path requires a valid bearer.
         if not _has_valid_session_token(request):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized"},
             )
     else:
-        # Loopback: only /api/* is gated, with the public-list exemption
-        # for SPA bootstrap. Everything else (SPA HTML, static, /docs)
-        # remains unauthenticated.
+        # Lenient (loopback, or off-loopback with --insecure):
+        # only /api/* is gated, with the public-list exemption for SPA
+        # bootstrap. Everything else (SPA HTML, static, /docs) remains
+        # unauthenticated. The --insecure path inherits this lenient
+        # mode after the operator's explicit "trust this LAN" opt-in.
         if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
             if not _has_valid_session_token(request):
                 return JSONResponse(
@@ -4359,7 +4367,14 @@ def start_server(
     allow_insecure = allow_public or os.environ.get("HERMES_ALLOW_INSECURE_BIND", "") == "1"
 
     # --- Bind guard ----------------------------------------------------
-    cert_path, key_path = _resolve_tls_paths(host)
+    # When --insecure is set, skip TLS resolution entirely. The flag means
+    # "plaintext network bind, treat like loopback" — auto-discovering a
+    # cert from ~/.hermes/tls/ would silently flip the bind to HTTPS while
+    # the operator explicitly asked for plaintext.
+    if allow_insecure:
+        cert_path, key_path = None, None
+    else:
+        cert_path, key_path = _resolve_tls_paths(host)
     has_tls = (
         cert_path is not None
         and key_path is not None
@@ -4395,6 +4410,7 @@ def start_server(
     # PTY child uses to publish events to the dashboard sidebar.
     app.state.bound_host = host
     app.state.bound_port = port
+    app.state.allow_insecure = allow_insecure
 
     scheme = "https" if _TLS_CONTEXT is not None else "http"
 

@@ -198,3 +198,49 @@ def test_loopback_docs_unauthenticated_unchanged(client):
     web_server.app.state.bound_host = "127.0.0.1"
     r = client.get("/docs")
     assert r.status_code != 401
+
+
+# --- --insecure restores loopback-style semantics on a network bind ---
+
+def test_insecure_off_loopback_accepts_ephemeral_token(client, monkeypatch):
+    """--insecure / HERMES_ALLOW_INSECURE_BIND=1 on a network bind makes the
+    ephemeral session token work again — the operator's "trust this LAN"
+    opt-in restores the pre-strict-mode SPA flow."""
+    web_server.app.state.bound_host = "0.0.0.0"
+    web_server.app.state.allow_insecure = True
+    monkeypatch.delenv("API_SERVER_KEY", raising=False)
+    r = client.get(
+        "/api/sessions",
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+    assert r.status_code != 401
+
+
+def test_insecure_off_loopback_spa_root_unauthenticated(client, monkeypatch):
+    """With --insecure on a network bind, GET / returns the SPA HTML
+    (no bearer required) — restores the pre-strict-mode browser flow."""
+    web_server.app.state.bound_host = "0.0.0.0"
+    web_server.app.state.allow_insecure = True
+    monkeypatch.delenv("API_SERVER_KEY", raising=False)
+    r = client.get("/")
+    assert r.status_code != 401
+
+
+def test_insecure_off_loopback_public_paths_unauthenticated(client, monkeypatch):
+    """With --insecure on a network bind, the loopback public list applies
+    (status, schema, model info, etc. accessible without bearer)."""
+    web_server.app.state.bound_host = "0.0.0.0"
+    web_server.app.state.allow_insecure = True
+    monkeypatch.delenv("API_SERVER_KEY", raising=False)
+    r = client.get("/api/status")
+    assert r.status_code != 401
+
+
+def test_insecure_off_loopback_private_api_still_gated(client, monkeypatch):
+    """--insecure restores SPA flow but not "no auth at all" — non-public
+    /api/* routes still require the bearer (or the SPA's ephemeral token)."""
+    web_server.app.state.bound_host = "0.0.0.0"
+    web_server.app.state.allow_insecure = True
+    monkeypatch.delenv("API_SERVER_KEY", raising=False)
+    r = client.get("/api/sessions")  # no token at all
+    assert r.status_code == 401

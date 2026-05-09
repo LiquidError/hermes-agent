@@ -34,6 +34,7 @@ def _reset_dashboard_state():
         from hermes_cli import web_server
         web_server.app.state.bound_host = None
         web_server.app.state.bound_port = None
+        web_server.app.state.allow_insecure = False
         web_server._TLS_CONTEXT = None
     except Exception:
         pass

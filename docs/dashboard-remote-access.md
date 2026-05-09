@@ -87,7 +87,7 @@ Hitting the bare LAN IP (`https://192.168.x.y:9119`) fails hostname validation. 
 | `HERMES_TLS_CERT` | Explicit cert file path (overrides auto-discovery) | Cert lives outside `~/.hermes/tls/` |
 | `HERMES_TLS_KEY` | Explicit key file path | Pair with `HERMES_TLS_CERT` |
 | `HERMES_TLS_HOST` | Tailscale hostname → `~/.hermes/tls/<HERMES_TLS_HOST>.{crt,key}` | Multiple `*.ts.net.*` files in `~/.hermes/tls/` and you need to pick |
-| `HERMES_ALLOW_INSECURE_BIND` | `1` = allow off-loopback bind without TLS | Don't. Available as escape hatch; logs a loud warning every request |
+| `HERMES_ALLOW_INSECURE_BIND` | `1` = "trust this LAN" mode. Bind off-loopback without TLS, skip TLS auto-discovery (plaintext on the wire), and apply loopback-style auth: SPA bootstrap + ephemeral session token works in the browser. | Trusted-LAN browser access without going through the Tauri client. Logs a loud warning every request — intentionally annoying. |
 | `HERMES_DASHBOARD_TUI` | `1` = enable embedded chat tab + WebSocket endpoints | Optional, also set by `--tui` |
 | `HERMES_HOME` | Profile directory override | Existing, see profile docs; not new in this patch |
 
@@ -113,7 +113,7 @@ hermes dashboard [--host HOST] [--port PORT] [--no-open] [--insecure] [--tui]
 | `--host` | `127.0.0.1` | Bind interface |
 | `--port` | `9119` | Bind port |
 | `--no-open` | open | Skip browser auto-open |
-| `--insecure` | off | Equivalent to `HERMES_ALLOW_INSECURE_BIND=1`. Off-loopback bind without TLS |
+| `--insecure` | off | Equivalent to `HERMES_ALLOW_INSECURE_BIND=1`. "Trust this LAN" mode: plaintext bind, skip TLS auto-discovery, loopback-style auth (SPA + ephemeral token work) |
 | `--tui` | off | Enable embedded chat tab (WebSocket endpoints `/api/ws`, `/api/pty`, etc.) |
 
 ## Surfaces and where each key lives
@@ -173,7 +173,7 @@ For testing the dashboard today (no Tauri DashboardAdapter yet): paste `API_SERV
 
 ## Auth surface — what's gated, when
 
-The dashboard's auth model is bind-aware. **Off-loopback is strict** — every path requires a bearer, including `/`, `/docs`, `/openapi.json`, and static assets. There's no unauthenticated surface on the network.
+The dashboard's auth model is bind-aware. **Strict off-loopback** (default for non-loopback binds) requires a bearer on every path, including `/`, `/docs`, `/openapi.json`, and static assets — there's no unauthenticated surface on the network. **`--insecure` (or `HERMES_ALLOW_INSECURE_BIND=1`) explicitly relaxes this back to loopback semantics** for trusted-LAN browser access.
 
 | Route class | Loopback bind | Off-loopback bind |
 |---|---|---|
@@ -194,7 +194,15 @@ Off-loopback strict mode means a browser hitting `https://myhost.ts.net:9119/` o
 - The intended off-loopback consumer is the Tauri `DashboardAdapter`, which holds the bearer in keyvault and presents it on every request.
 - For phone or remote-machine browser use: tunnel `localhost:9119` over Tailscale (`tailscale serve` or SSH-port-forward), so the browser hits the loopback path. Or wait for the Tauri DashboardAdapter to land.
 
-If you genuinely need browser-SPA-over-network — e.g. a kiosk on the LAN — there is no built-in escape hatch in strict mode. `HERMES_ALLOW_INSECURE_BIND=1` only relaxes the TLS requirement (lets you bind 0.0.0.0 without a cert); the auth middleware still gates everything off-loopback. The supported alternative is to tunnel loopback: `tailscale serve` or `ssh -L 9119:localhost:9119` from the kiosk to the Hermes host, then the browser hits the loopback path where the SPA bootstrap exemption applies.
+If you genuinely need browser-SPA-over-network — e.g. a kiosk on the LAN — `--insecure` is the supported escape hatch. It does three things together:
+
+1. Allows the off-loopback bind without TLS (the bind guard accepts plaintext).
+2. Skips the TLS auto-discovery so cert files lying around in `~/.hermes/tls/` don't silently flip the bind to HTTPS — the printed scheme stays `http://`.
+3. Restores loopback-style auth: the `_PUBLIC_API_PATHS` exemption applies, the SPA HTML at `/` is served unauthenticated so the browser can bootstrap, and the ephemeral session token injected into that HTML works for `/api/*` calls.
+
+You're explicitly opting into "trust this LAN" — every request logs a warning. Use it for kiosks, LAN-trusted setups, or quick "I want to poke at the dashboard from my phone over Wi-Fi" workflows. Don't use it on networks you don't trust.
+
+The alternative for trust-skeptical setups is to tunnel loopback: `tailscale serve` or `ssh -L 9119:localhost:9119` from the kiosk to the Hermes host, so the browser hits a true loopback path on its own machine. That keeps strict mode active server-side while giving the browser its SPA bootstrap.
 
 ## Tauri client side
 
