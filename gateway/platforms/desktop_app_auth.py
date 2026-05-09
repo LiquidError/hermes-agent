@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,53 +33,78 @@ class TokenStore:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._records: List[ClientRecord] = []
+        # Concurrent WS handler tasks share one TokenStore instance and call
+        # verify() / touch() / list() in parallel. RLock keeps mutation atomic
+        # so iteration never sees a list mid-resize and last_seen_at writes
+        # don't race with verify().
+        self._lock = threading.RLock()
         self._load_from_disk()
 
     def is_empty(self) -> bool:
-        return not self._records
+        with self._lock:
+            return not self._records
 
     def list(self) -> List[ClientRecord]:
-        return list(self._records)
+        with self._lock:
+            return list(self._records)
 
     def add(self, client_name: str, token_plaintext: str) -> None:
-        self._records.append(
-            ClientRecord(name=client_name, token_hash=_hash(token_plaintext))
-        )
+        with self._lock:
+            self._records.append(
+                ClientRecord(name=client_name, token_hash=_hash(token_plaintext))
+            )
 
     def revoke(self, client_name: str) -> bool:
-        before = len(self._records)
-        self._records = [r for r in self._records if r.name != client_name]
-        return len(self._records) != before
+        with self._lock:
+            before = len(self._records)
+            self._records = [r for r in self._records if r.name != client_name]
+            return len(self._records) != before
 
     def touch(self, client_name: str) -> None:
         """Mark *client_name* as just-seen. No-op for unknown names."""
         now = time.time()
-        for rec in self._records:
-            if rec.name == client_name:
-                rec.last_seen_at = now
-                return
+        with self._lock:
+            for rec in self._records:
+                if rec.name == client_name:
+                    rec.last_seen_at = now
+                    return
 
     def verify(self, token_plaintext: Optional[str]) -> Optional[str]:
         if not token_plaintext:
             return None
         candidate = _hash(token_plaintext)
-        for rec in self._records:
-            if hmac.compare_digest(candidate, rec.token_hash):
-                return rec.name
+        with self._lock:
+            for rec in self._records:
+                if hmac.compare_digest(candidate, rec.token_hash):
+                    return rec.name
         return None
 
     def save(self) -> None:
-        payload = [
-            {
-                "name": r.name,
-                "token_hash": r.token_hash,
-                "last_seen_at": r.last_seen_at,
-            }
-            for r in self._records
-        ]
+        with self._lock:
+            payload = [
+                {
+                    "name": r.name,
+                    "token_hash": r.token_hash,
+                    "last_seen_at": r.last_seen_at,
+                }
+                for r in self._records
+            ]
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2))
+        # 0o600: auth state (client identity hashes, last-seen timestamps).
+        # Inheriting the process umask leaves it group/other-readable on most
+        # systems. Open the temp file with explicit perms so neither it nor
+        # the renamed final file leaks the store to a co-tenant user.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(payload, f, indent=2)
+        except Exception:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
         tmp.replace(self._path)
 
     def _load_from_disk(self) -> None:

@@ -8,6 +8,7 @@ returns the plaintext for a single key with rate-limiting.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 
@@ -85,6 +86,40 @@ class TestRedactDict:
             {"providers": {"openrouter": {"api_key": "sk-secretvalue123"}}}
         )
         assert "..." in out["providers"]["openrouter"]["api_key"]
+
+    def test_redacts_secret_inside_list_entry(self):
+        """``custom_providers`` is configured as a list of provider dicts. The
+        previous implementation only descended into nested dicts, so secret
+        keys inside list entries leaked verbatim through ``config.get``.
+        """
+        from tui_gateway.server import _redact_dict
+
+        out = _redact_dict(
+            {
+                "custom_providers": [
+                    {"name": "vendor-a", "api_key": "sk-vendor-a-secret"},
+                    {"name": "vendor-b", "token": "ghp_vendor_b_token_value"},
+                ]
+            }
+        )
+        first, second = out["custom_providers"]
+        assert "..." in first["api_key"]
+        assert first["name"] == "vendor-a"
+        assert "..." in second["token"]
+        assert second["name"] == "vendor-b"
+
+    def test_redacts_secret_inside_deeply_nested_list(self):
+        """Lists nested inside dicts nested inside lists still get traversed."""
+        from tui_gateway.server import _redact_dict
+
+        out = _redact_dict(
+            {
+                "outer": [
+                    {"inner": [{"password": "hunter2hunter2"}]},
+                ]
+            }
+        )
+        assert "..." in out["outer"][0]["inner"][0]["password"]
 
 
 # ---------------------------------------------------------------------------
@@ -225,10 +260,14 @@ async def test_full_config_returned_via_ws_is_redacted(redaction_adapter):
             await ws.send_json(
                 {"jsonrpc": "2.0", "id": 1, "method": "config.get", "params": {"key": "full"}}
             )
-            while True:
-                msg = json.loads(await ws.receive_str())
+            # Bounded receive — drains intervening events (e.g. session.info)
+            # while still failing fast if the expected response never arrives.
+            for _ in range(50):
+                msg = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=0.2))
                 if msg.get("id") == 1:
                     break
+            else:
+                pytest.fail("Timed out waiting for config.get response (id=1)")
 
             cfg = msg["result"]["config"]
             assert "..." in cfg["openai_api_key"]

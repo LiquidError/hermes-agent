@@ -3138,11 +3138,16 @@ class APIServerAdapter(BasePlatformAdapter):
                     if warn:
                         logger.warning("[%s] %s", self.name, warn)
                 except (FileNotFoundError, OSError, ssl.SSLError) as e:
-                    logger.warning(
-                        "[%s] TLS load failed: %s — starting plaintext",
+                    # Fail closed: the operator opted into TLS by setting
+                    # HERMES_TLS_CERT/HERMES_TLS_KEY. Falling back to
+                    # plaintext on a network bind would leak the bearer.
+                    logger.error(
+                        "[%s] TLS load failed: %s — refusing to start. "
+                        "Fix the cert/key paths or unset HERMES_TLS_CERT "
+                        "and HERMES_TLS_KEY to start in plaintext.",
                         self.name, e,
                     )
-                    ssl_context = None
+                    return False
 
             self._site = web.TCPSite(
                 self._runner, self._host, self._port, ssl_context=ssl_context

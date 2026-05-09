@@ -187,6 +187,79 @@ class TestTokenStore:
         assert rec.name == "client-a"
         assert rec.last_seen_at is None
 
+    def test_save_writes_file_with_owner_only_perms(self, tmp_path):
+        """Token store is auth state — must not be group/other-readable.
+        Inheriting the process umask leaves it 0o644 on most systems, which
+        lets a co-tenant user read the hashes or replace the file.
+        """
+        import os
+        import stat
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("POSIX file modes not meaningful on Windows")
+
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        path = tmp_path / "tokens.json"
+        store = TokenStore(path)
+        store.add("client-a", "tok1")
+        # Force a permissive default umask so inherited perms would fail.
+        prev = os.umask(0o000)
+        try:
+            store.save()
+        finally:
+            os.umask(prev)
+
+        mode = stat.S_IMODE(path.stat().st_mode)
+        # Owner read/write only — group/other bits all clear.
+        assert mode & 0o077 == 0, f"token file mode 0o{mode:o} leaks to non-owner"
+
+    def test_concurrent_verify_and_touch_does_not_race(self, tmp_path):
+        """Two concurrent WS handler tasks call verify()/touch() on a shared
+        store. Without the lock, verify()'s iteration could see _records
+        mid-mutation; touch()'s last_seen_at write could be lost. The lock
+        makes both atomic.
+        """
+        import threading
+
+        from gateway.platforms.desktop_app_auth import TokenStore
+
+        store = TokenStore(tmp_path / "tokens.json")
+        for i in range(20):
+            store.add(f"client-{i}", f"tok-{i}")
+
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def verifier():
+            try:
+                while not stop.is_set():
+                    assert store.verify("tok-7") == "client-7"
+            except Exception as exc:
+                errors.append(exc)
+
+        def toucher():
+            try:
+                while not stop.is_set():
+                    store.touch("client-7")
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=verifier, daemon=True),
+            threading.Thread(target=verifier, daemon=True),
+            threading.Thread(target=toucher, daemon=True),
+            threading.Thread(target=toucher, daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        threading.Event().wait(0.4)
+        stop.set()
+        for t in threads:
+            t.join(timeout=1.0)
+        assert errors == [], f"concurrent access raised: {errors}"
+
 
 # ---------------------------------------------------------------------------
 # WS handshake bearer-token middleware

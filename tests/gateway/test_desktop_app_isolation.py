@@ -8,6 +8,7 @@ state held in `_DispatcherState.sessions` is isolated.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 
@@ -53,10 +54,14 @@ async def two_client_adapter(tmp_path):
 
 
 async def _rpc(ws, rid: int, method: str, params: dict | None = None) -> dict:
-    """Send a request, drain events until the matching response arrives."""
+    """Send a request, drain events until the matching response arrives.
+
+    Bounded by ``asyncio.wait_for`` so a missed response surfaces as a
+    deterministic failure instead of stalling the test worker forever.
+    """
     await ws.send_json({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}})
     while True:
-        msg = json.loads(await ws.receive_str())
+        msg = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=5))
         if msg.get("id") == rid:
             return msg
 

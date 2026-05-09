@@ -102,6 +102,30 @@ def test_start_server_allow_insecure_runs_with_warning(monkeypatch, caplog):
     assert any("insecure" in r.message.lower() for r in caplog.records)
 
 
+def test_start_server_tls_load_failure_fails_closed(monkeypatch, fake_cert_pair):
+    """A broken cert pair on a network bind must refuse to start, not silently
+    drop to plaintext. _validate_bind_config let the bind through on the
+    promise of TLS; downgrading would leak the bearer in cleartext.
+    """
+    cert_path, key_path = fake_cert_pair
+    monkeypatch.setenv("HERMES_TLS_CERT", str(cert_path))
+    monkeypatch.setenv("HERMES_TLS_KEY", str(key_path))
+    monkeypatch.setenv("API_SERVER_KEY", "x" * 32)
+    monkeypatch.delenv("HERMES_ALLOW_INSECURE_BIND", raising=False)
+
+    from hermes_cli import tls_loader
+
+    def _explode(*_a, **_kw):
+        raise OSError("simulated cert read error")
+
+    monkeypatch.setattr(tls_loader, "load", _explode)
+
+    with patch.object(web_server.uvicorn, "run") as run:
+        with pytest.raises(BindRefused, match="TLS material"):
+            web_server.start_server(host="0.0.0.0", port=9119, open_browser=False)
+        run.assert_not_called()
+
+
 # --- _resolve_tls_paths --------------------------------------------------
 
 

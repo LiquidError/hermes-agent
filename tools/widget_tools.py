@@ -119,16 +119,15 @@ def _current_session_key(kwargs: dict) -> str:
 def _resolve_session(session_key: str) -> Optional[tuple[str, dict]]:
     """Map session_key (HERMES_SESSION_KEY) → (sid, session_dict).
 
-    Iterates _state().sessions. Process-wide session count is small; the
-    O(n) scan is fine in the hot path.
+    Widget tools execute on agent/background threads that don't inherit
+    the request's ``tui_gateway_state`` contextvar binding, so ``_state()``
+    resolves to ``_default_state``. The active session lives on whichever
+    per-connection state owned the originating request. Delegate to the
+    cross-state resolver in ``tui_gateway.server`` instead.
     """
-    from tui_gateway.server import _state
+    from tui_gateway.server import _resolve_session_by_key
 
-    state = _state()
-    for sid, sess in state.sessions.items():
-        if sess.get("session_key") == session_key:
-            return sid, sess
-    return None
+    return _resolve_session_by_key(session_key)
 
 
 def _err(code: int, message: str, **extra) -> str:

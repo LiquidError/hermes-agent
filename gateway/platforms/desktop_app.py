@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import socket as _socket
 import ssl
 from pathlib import Path
 from typing import Any, Optional
@@ -296,20 +295,11 @@ class DesktopAppAdapter(BasePlatformAdapter):
             )
             return False
 
-        # Port-conflict probe — fail fast if the port is already in use.
-        try:
-            with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-                s.settimeout(1)
-                s.connect(("127.0.0.1", self._port))
-            logger.error(
-                "[%s] Port %d already in use. Set platforms.desktop_app.port "
-                "in config.yaml or DESKTOP_APP_PORT.",
-                self.platform.value,
-                self._port,
-            )
-            return False
-        except (ConnectionRefusedError, OSError):
-            pass  # port is free
+        # Let aiohttp's TCPSite.start() report bind conflicts for the
+        # configured interface. The previous preflight always probed
+        # 127.0.0.1:<port>, so a Tailscale/LAN bind got falsely rejected
+        # whenever an unrelated localhost-only service held the same port,
+        # even though self._host:self._port was still free.
 
         async def _ws_route(request: "web.Request"):
             # An empty store means no clients have been paired; the

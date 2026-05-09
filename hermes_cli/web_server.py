@@ -908,8 +908,13 @@ async def get_meta(request: Request) -> dict:
         if path.startswith("/api/") and not path.startswith("/api/plugins/")
     })
 
-    gw_alive, gw_body = await _cached_gateway_health()
-    gateway_running = bool(gw_alive)
+    # Local PID check first (same-host install) — _cached_gateway_health()
+    # returns False when GATEWAY_HEALTH_URL is unset, which is the default
+    # config and would otherwise mark a running local gateway as unavailable.
+    gateway_running = get_running_pid() is not None
+    if not gateway_running and _GATEWAY_HEALTH_URL:
+        gw_alive, _gw_body = await _cached_gateway_health()
+        gateway_running = bool(gw_alive)
     gw_url = _GATEWAY_HEALTH_URL or None
 
     plugins: List[Dict[str, Any]] = []
@@ -4395,12 +4400,15 @@ def start_server(
         try:
             _TLS_CONTEXT = load(cert_path, key_path)
         except (FileNotFoundError, OSError) as e:
-            _log.warning("TLS load failed mid-startup: %s — continuing without TLS", e)
-            _TLS_CONTEXT = None
-        else:
-            warn = expiry_warning(_TLS_CONTEXT)
-            if warn:
-                _log.warning(warn)
+            # Fail closed: _validate_bind_config permitted this bind on the
+            # promise of TLS. Silently downgrading to plaintext on a network
+            # interface would leak the bearer in cleartext.
+            raise BindRefused(
+                f"Refusing to start: failed to load TLS material for {host}: {e}"
+            ) from e
+        warn = expiry_warning(_TLS_CONTEXT)
+        if warn:
+            _log.warning(warn)
     else:
         _TLS_CONTEXT = None
 

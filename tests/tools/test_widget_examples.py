@@ -20,9 +20,14 @@ def _read_call(name):
 
 
 def test_list_returns_each_starter_example():
+    """Listed names mirror the .tsx stems on disk. Asserting the relationship
+    rather than a hardcoded set keeps the test from breaking every time the
+    example catalog is extended.
+    """
     payload = _list_call()
-    names = {item["name"] for item in payload["examples"]}
-    assert {"static-info", "form-with-hermes-ask", "list-with-storage", "chart"}.issubset(names)
+    listed = {item["name"] for item in payload["examples"]}
+    on_disk = {p.stem for p in EXAMPLES_DIR.glob("*.tsx")}
+    assert listed == on_disk
 
 
 def test_list_extracts_summary_from_first_jsdoc_line():

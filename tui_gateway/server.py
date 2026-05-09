@@ -174,6 +174,34 @@ def _state_for_session(sid: str) -> "_DispatcherState":
         return _session_states.get(sid) or _default_state
 
 
+def _resolve_session_by_key(session_key: str) -> "tuple[str, dict] | None":
+    """Locate (sid, session_dict) for a given ``session_key`` across all
+    known dispatcher states. Returns ``None`` if no match.
+
+    Background threads (agent loops, widget tool dispatch) do not inherit
+    the request's contextvar binding, so ``_state()`` returns
+    ``_default_state``. Sessions actually live on whichever per-connection
+    state owned the request that created them. This helper scans every
+    registered state so callers from worker threads can still find their
+    session by key.
+    """
+    if not session_key:
+        return None
+    seen: set[int] = set()
+    states: list["_DispatcherState"] = [_default_state]
+    seen.add(id(_default_state))
+    with _session_states_lock:
+        for st in _session_states.values():
+            if id(st) not in seen:
+                seen.add(id(st))
+                states.append(st)
+    for state in states:
+        for sid, sess in list(state.sessions.items()):
+            if sess.get("session_key") == session_key:
+                return sid, sess
+    return None
+
+
 # ── Secret redaction (used by remote transports) ──────────────────────
 
 _SECRET_KEY_PATTERN = re.compile(
@@ -194,15 +222,22 @@ def _mask_value(value):
     return value[:4] + "..." + value[-4:]
 
 
+def _redact_value(value):
+    """Recursively redact secret-shaped keys in any value (dict, list, scalar)."""
+    if isinstance(value, dict):
+        return _redact_dict(value)
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
 def _redact_dict(d: dict) -> dict:
     out = {}
     for k, v in d.items():
-        if isinstance(v, dict):
-            out[k] = _redact_dict(v)
-        elif isinstance(k, str) and _is_secret_key(k):
+        if isinstance(k, str) and _is_secret_key(k):
             out[k] = _mask_value(v)
         else:
-            out[k] = v
+            out[k] = _redact_value(v)
     return out
 
 
@@ -880,14 +915,21 @@ def _enable_gateway_prompts() -> None:
 
 
 def _block(event: str, sid: str, payload: dict, timeout: int = 300) -> str:
+    # Route pending state through the session-owning state, not _state().
+    # _block is invoked from agent/tool worker threads that don't inherit
+    # the request's tui_gateway_state contextvar, so _state() resolves to
+    # _default_state. The matching _respond runs on the request thread
+    # with the per-connection state bound — they would read different
+    # dicts and the prompt would never resolve.
+    state = _state_for_session(sid)
     rid = uuid.uuid4().hex[:8]
     ev = threading.Event()
-    _state().pending[rid] = (sid, ev)
+    state.pending[rid] = (sid, ev)
     payload["request_id"] = rid
     _emit(event, sid, payload)
     ev.wait(timeout=timeout)
-    _state().pending.pop(rid, None)
-    return _state().answers.pop(rid, "")
+    state.pending.pop(rid, None)
+    return state.answers.pop(rid, "")
 
 
 def _clear_pending(sid: str | None = None) -> None:
@@ -899,9 +941,23 @@ def _clear_pending(sid: str | None = None) -> None:
     sessions sharing the same tui_gateway process.  When *sid* is
     None, every pending prompt is released (used during shutdown).
     """
-    for rid, (owner_sid, ev) in list(_state().pending.items()):
-        if sid is None or owner_sid == sid:
-            _state().answers[rid] = ""
+    if sid is not None:
+        state = _state_for_session(sid)
+        for rid, (owner_sid, ev) in list(state.pending.items()):
+            if owner_sid == sid:
+                state.answers[rid] = ""
+                ev.set()
+        return
+    seen: set[int] = {id(_default_state)}
+    states: list["_DispatcherState"] = [_default_state]
+    with _session_states_lock:
+        for st in _session_states.values():
+            if id(st) not in seen:
+                seen.add(id(st))
+                states.append(st)
+    for state in states:
+        for rid, (_owner_sid, ev) in list(state.pending.items()):
+            state.answers[rid] = ""
             ev.set()
 
 
@@ -3806,13 +3862,19 @@ def _(rid, params: dict) -> dict:
         try:
             from run_agent import AIAgent
 
-            result = AIAgent(
-                model=_resolve_model(),
-                quiet_mode=True,
-                platform="tui",
-                max_iterations=8,
-                enabled_toolsets=[],
-            ).run_conversation(text, conversation_history=snapshot)
+            # Seed the reflective agent from the live session so provider /
+            # base URL / api_key / service_tier / ephemeral_system_prompt /
+            # request_overrides match the surrounding conversation. Cap
+            # iterations and disable tools — btw is a one-shot reflective
+            # call.
+            kwargs = _background_agent_kwargs(
+                session["agent"], f"btw_{uuid.uuid4().hex[:6]}"
+            )
+            kwargs["max_iterations"] = 8
+            kwargs["enabled_toolsets"] = []
+            result = AIAgent(**kwargs).run_conversation(
+                text, conversation_history=snapshot
+            )
             _emit(
                 "btw.complete",
                 sid,
@@ -3941,13 +4003,16 @@ def _spawn_widget_api_call_worker(
 
             if capability == "hermes.ask":
                 prompt = str(call_args.get("prompt", "") or "")
-                btw_agent = AIAgent(
-                    model=_resolve_model(),
-                    quiet_mode=True,
-                    platform="tui",
-                    max_iterations=8,
-                    enabled_toolsets=[],
+                # Seed the widget-backed agent from the live session so the
+                # answer comes from the same provider / base URL / api_key /
+                # service_tier / overrides as the surrounding conversation.
+                parent_agent = sess.get("agent") if sess else None
+                btw_kwargs = _background_agent_kwargs(
+                    parent_agent, f"hermes_ask_{correlation_id}"
                 )
+                btw_kwargs["max_iterations"] = 8
+                btw_kwargs["enabled_toolsets"] = []
+                btw_agent = AIAgent(**btw_kwargs)
                 # Stash the live agent on the registry entry so a concurrent
                 # widget.api_cancel can call agent.interrupt() to abort.
                 if api_reg is not None and entry is not None:

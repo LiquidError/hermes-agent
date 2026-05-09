@@ -22,30 +22,35 @@ export default function RetroForm() {
   const [wins, setWins] = useState('');
   const [misses, setMisses] = useState('');
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const fillFromAgent = useCallback(async () => {
     setBusy(true);
     try {
       const summary = await canvasAPI.hermes.ask(
-        'Fill in known wins and misses from this quarter as bullet lists.'
+        'Return two markdown bullet-list sections separated exactly by "\\n---\\n": first wins, then misses.'
       );
-      // The card decides how to parse the answer — here we split on a
-      // separator the prompt asks for.
-      const [w, m] = summary.split('\n---\n');
-      if (w) setWins(w);
-      if (m) setMisses(m);
+      const [w = '', m = ''] = summary.split('\n---\n', 2);
+      if (w.trim()) setWins(w.trim());
+      if (m.trim()) setMisses(m.trim());
     } finally {
       setBusy(false);
     }
   }, []);
 
   const save = useCallback(async () => {
-    await canvasAPI.notes.save({
-      title: 'Q3 retro',
-      body: `## Wins\n${wins}\n\n## Misses\n${misses}`,
-      tags: ['retro', 'quarterly'],
-    });
-  }, [wins, misses]);
+    if (saving) return;
+    setSaving(true);
+    try {
+      await canvasAPI.notes.save({
+        title: 'Q3 retro',
+        body: `## Wins\n${wins}\n\n## Misses\n${misses}`,
+        tags: ['retro', 'quarterly'],
+      });
+    } finally {
+      setSaving(false);
+    }
+  }, [wins, misses, saving]);
 
   return (
     <Card title="Q3 retro">
@@ -60,7 +65,9 @@ export default function RetroForm() {
           <Button onClick={fillFromAgent} disabled={busy}>
             {busy ? 'Asking…' : 'Fill from agent'}
           </Button>
-          <Button onClick={save} variant="primary">Save as note</Button>
+          <Button onClick={save} variant="primary" disabled={saving}>
+            {saving ? 'Saving…' : 'Save as note'}
+          </Button>
         </Row>
         {busy && <Text variant="muted">Hermes is thinking…</Text>}
       </Stack>

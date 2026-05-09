@@ -59,6 +59,48 @@ async def test_tcpsite_gets_ssl_context_when_tls_files_present(
 
 
 @pytest.mark.asyncio
+async def test_connect_returns_false_when_tls_load_fails(monkeypatch, tmp_path):
+    """Operator opted into TLS via HERMES_TLS_CERT/HERMES_TLS_KEY but the cert
+    pair is broken (missing, unreadable, malformed). connect() must refuse to
+    start instead of silently dropping the ssl_context and exposing the bearer
+    on plaintext.
+    """
+    bogus_cert = tmp_path / "missing.crt"
+    bogus_key = tmp_path / "missing.key"
+    monkeypatch.setenv("HERMES_TLS_CERT", str(bogus_cert))
+    monkeypatch.setenv("HERMES_TLS_KEY", str(bogus_key))
+
+    runner_stub = SimpleNamespace(setup=AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "gateway.platforms.api_server.web.AppRunner", lambda app: runner_stub
+    )
+    tcpsite_called = {"value": False}
+
+    def _stub_tcpsite(*_a, **_kw):
+        tcpsite_called["value"] = True
+        site = AsyncMock()
+        site.start = AsyncMock(return_value=None)
+        return site
+
+    monkeypatch.setattr(
+        "gateway.platforms.api_server.web.TCPSite", _stub_tcpsite
+    )
+
+    api_key = secrets.token_hex(16)
+    adapter = APIServerAdapter(
+        PlatformConfig(
+            enabled=True,
+            extra={"host": "0.0.0.0", "port": 8642, "key": api_key},
+        )
+    )
+    started = await adapter.connect()
+    assert started is False, "TLS load failure must refuse to start"
+    assert tcpsite_called["value"] is False, (
+        "TCPSite should never be constructed once TLS load fails"
+    )
+
+
+@pytest.mark.asyncio
 async def test_tcpsite_no_ssl_context_when_env_unset(monkeypatch):
     """Plaintext path is preserved when HERMES_TLS_* env vars are absent."""
     monkeypatch.delenv("HERMES_TLS_CERT", raising=False)

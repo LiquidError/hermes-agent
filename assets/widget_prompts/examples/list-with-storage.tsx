@@ -28,15 +28,24 @@ export default function TrackerCard() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    canvasAPI.storage.get(KEY).then((value) => {
-      if (Array.isArray(value)) setItems(value as string[]);
-      setHydrated(true);
-    });
+    canvasAPI.storage
+      .get(KEY)
+      .then((value) => {
+        if (Array.isArray(value)) setItems(value as string[]);
+      })
+      .catch(() => {
+        // Storage read failed — start with an empty list so the card still
+        // renders. Surface a non-blocking error here if you need it visible.
+      })
+      .finally(() => setHydrated(true));
   }, []);
 
   const persist = (next: string[]) => {
     setItems(next);
-    canvasAPI.storage.set(KEY, next);
+    canvasAPI.storage.set(KEY, next).catch(() => {
+      // Storage write failed — items remain in local state so the user
+      // doesn't lose their edits, but they won't survive a remount.
+    });
   };
 
   const add = () => {
