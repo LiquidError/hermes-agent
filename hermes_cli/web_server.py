@@ -339,8 +339,12 @@ def _resolve_tls_paths(host: str) -> tuple[Path | None, Path | None]:
     (``myhost.ts.net``), not the bind address. Resolution priority:
 
     1. ``HERMES_TLS_CERT`` + ``HERMES_TLS_KEY`` env vars (explicit override).
+       Always honored, regardless of bind.
     2. ``HERMES_TLS_HOST`` env var → ``tls/<HERMES_TLS_HOST>.{crt,key}``.
-    3. Single glob match: ``tls/*.ts.net.{crt,key}``.
+       Always honored, regardless of bind.
+    3. Single glob match: ``tls/*.ts.net.{crt,key}``. **Off-loopback only** —
+       loopback binds stay plaintext for zero-config local UX, even if cert
+       files are sitting on disk for the gateway / off-loopback use.
     4. ``(None, None)`` — caller treats as "no TLS available".
     """
     cert_env = os.environ.get("HERMES_TLS_CERT")
@@ -354,7 +358,13 @@ def _resolve_tls_paths(host: str) -> tuple[Path | None, Path | None]:
     if tls_host:
         return tls_dir / f"{tls_host}.crt", tls_dir / f"{tls_host}.key"
 
-    if tls_dir.is_dir():
+    try:
+        from gateway.platforms.base import is_network_accessible
+        is_off_loopback = is_network_accessible(host)
+    except ImportError:
+        is_off_loopback = False
+
+    if is_off_loopback and tls_dir.is_dir():
         certs = sorted(tls_dir.glob("*.ts.net.crt"))
         if len(certs) == 1:
             cert = certs[0]
@@ -397,14 +407,62 @@ async def host_header_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Require the session token on all /api/ routes except the public list."""
+    """Bearer-token gate for dashboard routes.
+
+    Loopback bind — current behaviour preserved: ``/api/*`` requires a
+    valid bearer except for the documented ``_PUBLIC_API_PATHS`` exemption
+    (status, config schema, model info, plugin list, etc.) which exists
+    so the SPA can bootstrap before reading the injected ephemeral token.
+    Non-API routes (``/``, ``/docs``, static assets) are unauthenticated
+    on loopback because the SPA needs them to render in the browser.
+
+    Off-loopback bind — strict mode: **every** path requires a valid
+    bearer. The ``/api/*`` public list is dropped (config schema / plugin
+    list / rescan should not be reachable on the network), and the rest
+    of the surface (``/`` SPA HTML, ``/docs`` OpenAPI, ``/openapi.json``,
+    every static asset) is gated too. Reasoning:
+
+    - ``/docs`` and ``/openapi.json`` enumerate every endpoint and its
+      request/response schema — a reconnaissance leak.
+    - ``/`` returns the SPA HTML which embeds the ephemeral session token;
+      the token itself is useless off-loopback (the auth middleware
+      rejects it) but the format and the bootstrap pattern still leak.
+    - Static assets are not sensitive individually, but serving them
+      unauthenticated reveals that a Hermes dashboard is running, helps
+      attackers fingerprint the version, and bloats the unauthenticated
+      attack surface for no benefit.
+
+    The intended off-loopback consumer is the Tauri ``DashboardAdapter``
+    which always presents a bearer. Browser-SPA-over-network is not a
+    supported use case (use loopback, or tunnel loopback over Tailscale).
+    """
+    bound_host = getattr(request.app.state, "bound_host", None) or "127.0.0.1"
+    try:
+        from gateway.platforms.base import is_network_accessible
+        off_loopback = is_network_accessible(bound_host)
+    except ImportError:
+        # Fail closed: when we can't classify the bind, gate everything.
+        off_loopback = True
+
     path = request.url.path
-    if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
+
+    if off_loopback:
+        # Strict mode: every path requires a valid bearer.
         if not _has_valid_session_token(request):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized"},
             )
+    else:
+        # Loopback: only /api/* is gated, with the public-list exemption
+        # for SPA bootstrap. Everything else (SPA HTML, static, /docs)
+        # remains unauthenticated.
+        if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
+            if not _has_valid_session_token(request):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Unauthorized"},
+                )
     return await call_next(request)
 
 
@@ -4338,16 +4396,18 @@ def start_server(
     app.state.bound_host = host
     app.state.bound_port = port
 
+    scheme = "https" if _TLS_CONTEXT is not None else "http"
+
     if open_browser:
         import webbrowser
 
         def _open():
             time.sleep(1.0)
-            webbrowser.open(f"http://{host}:{port}")
+            webbrowser.open(f"{scheme}://{host}:{port}")
 
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"  Hermes Web UI → http://{host}:{port}")
+    print(f"  Hermes Web UI → {scheme}://{host}:{port}")
     ssl_keyfile = str(_TLS_CONTEXT.key_path) if _TLS_CONTEXT is not None else None
     ssl_certfile = str(_TLS_CONTEXT.cert_path) if _TLS_CONTEXT is not None else None
     uvicorn.run(

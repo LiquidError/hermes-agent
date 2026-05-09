@@ -160,3 +160,33 @@ def test_resolve_tls_paths_none_when_no_files(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     c, k = web_server._resolve_tls_paths(host="0.0.0.0")
     assert c is None and k is None
+
+
+def test_resolve_tls_paths_glob_skipped_on_loopback(monkeypatch, tmp_path):
+    """Loopback bind stays plaintext even when ts.net cert files exist on disk.
+
+    The auto-glob is intended for off-loopback exposure only — Tailscale
+    certs on loopback would silently flip the dashboard to HTTPS while the
+    browser-open URL stays http://, breaking the zero-config local UX.
+    Explicit env-var overrides still work on loopback (tested above).
+    """
+    monkeypatch.delenv("HERMES_TLS_CERT", raising=False)
+    monkeypatch.delenv("HERMES_TLS_KEY", raising=False)
+    monkeypatch.delenv("HERMES_TLS_HOST", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    (tls_dir / "found.ts.net.crt").write_text("c")
+    (tls_dir / "found.ts.net.key").write_text("k")
+    c, k = web_server._resolve_tls_paths(host="127.0.0.1")
+    assert c is None and k is None
+
+
+def test_resolve_tls_paths_explicit_env_works_on_loopback(monkeypatch, tmp_path):
+    """Explicit HERMES_TLS_CERT/KEY env always wins, even on loopback."""
+    cert = tmp_path / "explicit.crt"
+    key = tmp_path / "explicit.key"
+    monkeypatch.setenv("HERMES_TLS_CERT", str(cert))
+    monkeypatch.setenv("HERMES_TLS_KEY", str(key))
+    c, k = web_server._resolve_tls_paths(host="127.0.0.1")
+    assert c == cert and k == key
