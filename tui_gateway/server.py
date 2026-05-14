@@ -1,4 +1,6 @@
 import atexit
+import base64
+import binascii
 import concurrent.futures
 import contextvars
 import copy
@@ -6,6 +8,7 @@ import json
 import logging
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -24,6 +27,10 @@ from tui_gateway.transport import (
     bind_transport,
     current_transport,
     reset_transport,
+)
+from tui_gateway.widget_runtime import (
+    ApiCallRegistry as _ApiCallRegistry,
+    WidgetRegistry as _WidgetRegistry,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,10 +122,152 @@ except Exception:
 
 from tui_gateway.render import make_stream_renderer, render_diff, render_message
 
-_sessions: dict[str, dict] = {}
+class _DispatcherState:
+    """Per-connection runtime state. The TUI's stdio path uses a single
+    module-level instance; each WS connection owns its own to keep
+    in-flight sessions, pending RPC waits, and queued answers from
+    leaking across clients. The state.db-backed persistent session
+    store is unaffected.
+
+    ``redact_secrets`` is set by remote transports (DesktopAppAdapter)
+    so config dumps via ``config.get key="full"`` mask credential-shaped
+    values; the local TUI keeps verbatim access.
+    """
+
+    def __init__(self) -> None:
+        self.sessions: dict[str, dict] = {}
+        self.pending: dict[str, tuple[str, threading.Event]] = {}
+        self.answers: dict[str, str] = {}
+        self.redact_secrets: bool = False
+
+
 _methods: dict[str, callable] = {}
-_pending: dict[str, tuple[str, threading.Event]] = {}
-_answers: dict[str, str] = {}
+_default_state = _DispatcherState()
+_state_var: contextvars.ContextVar["_DispatcherState"] = contextvars.ContextVar(
+    "tui_gateway_state", default=_default_state
+)
+
+
+def _state() -> "_DispatcherState":
+    return _state_var.get()
+
+
+# Maps every active session_id to its owning state. Lets background
+# threads (agent stream callbacks, slash workers) route events to the
+# right transport without inheriting the request's contextvar binding.
+_session_states: dict[str, "_DispatcherState"] = {}
+_session_states_lock = threading.Lock()
+
+
+def _register_session(sid: str) -> None:
+    with _session_states_lock:
+        _session_states[sid] = _state()
+
+
+def _unregister_session(sid: str) -> None:
+    with _session_states_lock:
+        _session_states.pop(sid, None)
+
+
+def _state_for_session(sid: str) -> "_DispatcherState":
+    with _session_states_lock:
+        return _session_states.get(sid) or _default_state
+
+
+def _resolve_session_by_key(session_key: str) -> "tuple[str, dict] | None":
+    """Locate (sid, session_dict) for a given ``session_key`` across all
+    known dispatcher states. Returns ``None`` if no match.
+
+    Background threads (agent loops, widget tool dispatch) do not inherit
+    the request's contextvar binding, so ``_state()`` returns
+    ``_default_state``. Sessions actually live on whichever per-connection
+    state owned the request that created them. This helper scans every
+    registered state so callers from worker threads can still find their
+    session by key.
+    """
+    if not session_key:
+        return None
+    seen: set[int] = set()
+    states: list["_DispatcherState"] = [_default_state]
+    seen.add(id(_default_state))
+    with _session_states_lock:
+        for st in _session_states.values():
+            if id(st) not in seen:
+                seen.add(id(st))
+                states.append(st)
+    for state in states:
+        for sid, sess in list(state.sessions.items()):
+            if sess.get("session_key") == session_key:
+                return sid, sess
+    return None
+
+
+# ── Secret redaction (used by remote transports) ──────────────────────
+
+_SECRET_KEY_PATTERN = re.compile(
+    r"(api[_-]?key|token|secret|password|credentials|bearer)$",
+    re.IGNORECASE,
+)
+
+
+def _is_secret_key(key: str) -> bool:
+    return bool(_SECRET_KEY_PATTERN.search(key))
+
+
+def _mask_value(value):
+    if not isinstance(value, str):
+        return value
+    if len(value) < 12:
+        return "***"
+    return value[:4] + "..." + value[-4:]
+
+
+def _redact_value(value):
+    """Recursively redact secret-shaped keys in any value (dict, list, scalar)."""
+    if isinstance(value, dict):
+        return _redact_dict(value)
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
+def _redact_dict(d: dict) -> dict:
+    out = {}
+    for k, v in d.items():
+        if isinstance(k, str) and _is_secret_key(k):
+            out[k] = _mask_value(v)
+        else:
+            out[k] = _redact_value(v)
+    return out
+
+
+# config.reveal_secret rate limiter — global window so an attacker can't
+# bypass it by cycling connections.
+_REVEAL_MAX_PER_WINDOW = 5
+_REVEAL_WINDOW_SECONDS = 30
+_reveal_timestamps: list[float] = []
+_reveal_lock = threading.Lock()
+
+
+def _reveal_check() -> bool:
+    """Return True if a reveal call is permitted under the rate limit."""
+    now = time.time()
+    cutoff = now - _REVEAL_WINDOW_SECONDS
+    with _reveal_lock:
+        _reveal_timestamps[:] = [t for t in _reveal_timestamps if t > cutoff]
+        if len(_reveal_timestamps) >= _REVEAL_MAX_PER_WINDOW:
+            return False
+        _reveal_timestamps.append(now)
+        return True
+
+
+# Module-level aliases — the stdio TUI never binds _state_var, so reads/
+# writes through these names always hit _default_state and behave exactly
+# as before. Code paths that may run under a per-connection binding use
+# ``_state().sessions`` / ``.pending`` / ``.answers`` instead.
+_sessions: dict[str, dict] = _default_state.sessions
+_pending: dict[str, tuple[str, threading.Event]] = _default_state.pending
+_answers: dict[str, str] = _default_state.answers
 _db = None
 _db_error: str | None = None
 _stdout_lock = threading.Lock()
@@ -373,8 +522,10 @@ def write_json(obj: dict) -> bool:
     """
     if obj.get("method") == "event":
         sid = ((obj.get("params") or {}).get("session_id")) or ""
-        if sid and (t := (_sessions.get(sid) or {}).get("transport")) is not None:
-            return t.write(obj)
+        if sid:
+            owner = _state_for_session(sid)
+            if (t := (owner.sessions.get(sid) or {}).get("transport")) is not None:
+                return t.write(obj)
 
     return (current_transport() or _stdio_transport).write(obj)
 
@@ -439,6 +590,24 @@ def method(name: str):
     return dec
 
 
+_event_handlers: dict[str, callable] = {}
+
+
+def event_handler(name: str):
+    """Register a handler for inbound client → server event-shape messages.
+
+    Handler signature: ``handler(params: dict) -> None``. ``params`` is
+    the full ``params`` field of the event message — typically containing
+    ``type``, ``session_id``, and ``payload``.
+    """
+
+    def dec(fn):
+        _event_handlers[name] = fn
+        return fn
+
+    return dec
+
+
 def _normalize_request(req: Any) -> tuple[Any, str, dict] | dict:
     """Validate a JSON-RPC request enough for safe local dispatch."""
     if not isinstance(req, dict):
@@ -485,6 +654,21 @@ def dispatch(req: dict, transport: Optional[Transport] = None) -> dict | None:
     t = transport or _stdio_transport
     token = bind_transport(t)
     try:
+        # Inbound client → server events have no id and need no response.
+        # Route them to typed-event handlers; drop unknown event types
+        # silently rather than producing a -32601.
+        if req.get("method") == "event":
+            params = req.get("params") or {}
+            handler = _event_handlers.get(params.get("type", ""))
+            if handler is not None:
+                try:
+                    handler(params)
+                except Exception as exc:
+                    logger.warning(
+                        "event handler %s raised: %s", params.get("type"), exc
+                    )
+            return None
+
         normalized = _normalize_request(req)
         if isinstance(normalized, dict):
             return normalized
@@ -548,9 +732,19 @@ def _start_agent_build(sid: str, session: dict) -> None:
         worker = None
         notify_registered = False
         try:
+            from tui_gateway.widget_runtime import (
+                set_widget_render_available,
+                reset_widget_render_available,
+            )
+
+            caps = current.get("client_capabilities", []) or []
             tokens = _set_session_context(key)
             try:
-                agent = _make_agent(sid, key)
+                widget_token = set_widget_render_available("widget.render" in caps)
+                try:
+                    agent = _make_agent(sid, key)
+                finally:
+                    reset_widget_render_available(widget_token)
             finally:
                 _clear_session_context(tokens)
 
@@ -613,7 +807,7 @@ def _start_agent_build(sid: str, session: dict) -> None:
 
 
 def _sess_nowait(params, rid):
-    s = _sessions.get(params.get("session_id") or "")
+    s = _state().sessions.get(params.get("session_id") or "")
     return (s, None) if s else (None, _err(rid, 4001, "session not found"))
 
 
@@ -721,14 +915,21 @@ def _enable_gateway_prompts() -> None:
 
 
 def _block(event: str, sid: str, payload: dict, timeout: int = 300) -> str:
+    # Route pending state through the session-owning state, not _state().
+    # _block is invoked from agent/tool worker threads that don't inherit
+    # the request's tui_gateway_state contextvar, so _state() resolves to
+    # _default_state. The matching _respond runs on the request thread
+    # with the per-connection state bound — they would read different
+    # dicts and the prompt would never resolve.
+    state = _state_for_session(sid)
     rid = uuid.uuid4().hex[:8]
     ev = threading.Event()
-    _pending[rid] = (sid, ev)
+    state.pending[rid] = (sid, ev)
     payload["request_id"] = rid
     _emit(event, sid, payload)
     ev.wait(timeout=timeout)
-    _pending.pop(rid, None)
-    return _answers.pop(rid, "")
+    state.pending.pop(rid, None)
+    return state.answers.pop(rid, "")
 
 
 def _clear_pending(sid: str | None = None) -> None:
@@ -740,9 +941,23 @@ def _clear_pending(sid: str | None = None) -> None:
     sessions sharing the same tui_gateway process.  When *sid* is
     None, every pending prompt is released (used during shutdown).
     """
-    for rid, (owner_sid, ev) in list(_pending.items()):
-        if sid is None or owner_sid == sid:
-            _answers[rid] = ""
+    if sid is not None:
+        state = _state_for_session(sid)
+        for rid, (owner_sid, ev) in list(state.pending.items()):
+            if owner_sid == sid:
+                state.answers[rid] = ""
+                ev.set()
+        return
+    seen: set[int] = {id(_default_state)}
+    states: list["_DispatcherState"] = [_default_state]
+    with _session_states_lock:
+        for st in _session_states.values():
+            if id(st) not in seen:
+                seen.add(id(st))
+                states.append(st)
+    for state in states:
+        for rid, (_owner_sid, ev) in list(state.pending.items()):
+            state.answers[rid] = ""
             ev.set()
 
 
@@ -1023,7 +1238,10 @@ def _load_enabled_toolsets() -> list[str] | None:
 
 
 def _session_tool_progress_mode(sid: str) -> str:
-    return str(_sessions.get(sid, {}).get("tool_progress_mode", "all") or "all")
+    return str(
+        _state_for_session(sid).sessions.get(sid, {}).get("tool_progress_mode", "all")
+        or "all"
+    )
 
 
 def _tool_progress_enabled(sid: str) -> bool:
@@ -1486,7 +1704,7 @@ def _tool_summary(name: str, result: str, duration_s: float | None) -> str | Non
 
 
 def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
-    session = _sessions.get(sid)
+    session = _state().sessions.get(sid)
     if session is not None:
         try:
             from agent.display import capture_local_edit_snapshot
@@ -1509,7 +1727,7 @@ def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
 
 def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result: str):
     payload = {"tool_id": tool_call_id, "name": name}
-    session = _sessions.get(sid)
+    session = _state().sessions.get(sid)
     snapshot = None
     started_at = None
     if session is not None:
@@ -1803,11 +2021,20 @@ def _background_agent_kwargs(agent, task_id: str) -> dict:
 
 
 def _reset_session_agent(sid: str, session: dict) -> dict:
+    from tui_gateway.widget_runtime import (
+        set_widget_render_available,
+        reset_widget_render_available,
+    )
+    caps = session.get("client_capabilities", [])
     tokens = _set_session_context(session["session_key"])
     try:
-        new_agent = _make_agent(
-            sid, session["session_key"], session_id=session["session_key"]
-        )
+        widget_token = set_widget_render_available("widget.render" in caps)
+        try:
+            new_agent = _make_agent(
+                sid, session["session_key"], session_id=session["session_key"]
+            )
+        finally:
+            reset_widget_render_available(widget_token)
     finally:
         _clear_session_context(tokens)
     session["agent"] = new_agent
@@ -1881,8 +2108,12 @@ def _make_agent(sid: str, key: str, session_id: str | None = None):
 
 
 def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
-    _sessions[sid] = {
+    state = _state()
+    # Preserve client_capabilities if already stashed before this call.
+    existing = state.sessions.get(sid) or {}
+    state.sessions[sid] = {
         "agent": agent,
+        "client_capabilities": existing.get("client_capabilities", []),
         "session_key": key,
         "history": history,
         "history_lock": threading.Lock(),
@@ -1899,14 +2130,17 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         # Pin async event emissions to whichever transport created the
         # session (stdio for Ink, JSON-RPC WS for the dashboard sidebar).
         "transport": current_transport() or _stdio_transport,
+        "widget_registry": existing.get("widget_registry") or _WidgetRegistry(),
+        "api_call_registry": existing.get("api_call_registry") or _ApiCallRegistry(),
     }
+    _register_session(sid)
     try:
-        _sessions[sid]["slash_worker"] = _SlashWorker(
+        state.sessions[sid]["slash_worker"] = _SlashWorker(
             key, getattr(agent, "model", _resolve_model())
         )
     except Exception:
         # Defer hard-failure to slash.exec; chat still works without slash worker.
-        _sessions[sid]["slash_worker"] = None
+        state.sessions[sid]["slash_worker"] = None
     try:
         from tools.approval import register_gateway_notify, load_permanent_allowlist
 
@@ -2037,12 +2271,15 @@ def _(rid, params: dict) -> dict:
     _enable_gateway_prompts()
 
     ready = threading.Event()
+    state = _state()
 
-    _sessions[sid] = {
+    caps = list(getattr(current_transport(), "client_capabilities", []) or [])
+    state.sessions[sid] = {
         "agent": None,
         "agent_error": None,
         "agent_ready": ready,
         "attached_images": [],
+        "client_capabilities": caps,
         "cols": cols,
         "edit_snapshots": {},
         "history": [],
@@ -2057,12 +2294,17 @@ def _(rid, params: dict) -> dict:
         "tool_progress_mode": _load_tool_progress_mode(),
         "tool_started_at": {},
         "transport": current_transport() or _stdio_transport,
+        "widget_registry": _WidgetRegistry(),
+        "api_call_registry": _ApiCallRegistry(),
     }
+    _register_session(sid)
 
     # Return the lightweight session immediately so Ink can paint the composer
     # + skeleton panel, then build the real AIAgent just after this response is
     # flushed.  This keeps startup responsive while still hydrating tools/skills
     # without requiring the user to submit a first prompt.
+    # _start_agent_build reads client_capabilities from the session dict and
+    # injects widget-render availability into the agent build.
     def _deferred_build() -> None:
         session = _sessions.get(sid)
         if session is not None:
@@ -2195,6 +2437,14 @@ def _(rid, params: dict) -> dict:
     sid = uuid.uuid4().hex[:8]
     _enable_gateway_prompts()
     try:
+        from tui_gateway.widget_runtime import (
+            set_widget_render_available,
+            reset_widget_render_available,
+        )
+
+        resume_caps = list(
+            getattr(current_transport(), "client_capabilities", []) or []
+        )
         db.reopen_session(target)
         history = db.get_messages_as_conversation(target)
         display_history = db.get_messages_as_conversation(
@@ -2203,9 +2453,16 @@ def _(rid, params: dict) -> dict:
         messages = _history_to_messages(display_history)
         tokens = _set_session_context(target)
         try:
-            agent = _make_agent(sid, target, session_id=target)
+            widget_token = set_widget_render_available(
+                "widget.render" in resume_caps
+            )
+            try:
+                agent = _make_agent(sid, target, session_id=target)
+            finally:
+                reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
+        _state().sessions.setdefault(sid, {})["client_capabilities"] = resume_caps
         _init_session(sid, target, agent, history, cols=int(params.get("cols", 80)))
     except Exception as e:
         return _err(rid, 5000, f"resume failed: {e}")
@@ -2574,7 +2831,33 @@ def _(rid, params: dict) -> dict:
 @method("session.close")
 def _(rid, params: dict) -> dict:
     sid = params.get("session_id", "")
-    session = _sessions.pop(sid, None)
+    sessions = _state().sessions
+    session = sessions.get(sid)
+    if session is not None:
+        # Cancel every in-flight widget.api_call correlation and emit
+        # widget.api_cancel before tearing down the session dict.
+        api_reg = session.get("api_call_registry")
+        if api_reg is not None:
+            for snapshot in api_reg.snapshot_inflight():
+                entry = api_reg.cancel(snapshot.correlation_id, reason="session_ended")
+                if entry is None:
+                    continue
+                _emit(
+                    "widget.api_cancel",
+                    sid,
+                    {
+                        "correlation_id": entry.correlation_id,
+                        "card_id": entry.card_id,
+                        "reason": "session_ended",
+                    },
+                )
+                if entry.agent_ref is not None:
+                    try:
+                        entry.agent_ref.interrupt()
+                    except Exception:
+                        pass
+    session = sessions.pop(sid, None)
+    _unregister_session(sid)
     if not session:
         return _ok(rid, {"closed": False})
     _finalize_session(session)
@@ -2638,11 +2921,26 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5008, f"branch failed: {e}")
     new_sid = uuid.uuid4().hex[:8]
     try:
+        from tui_gateway.widget_runtime import (
+            set_widget_render_available,
+            reset_widget_render_available,
+        )
+
+        branch_caps = list(
+            getattr(current_transport(), "client_capabilities", []) or []
+        )
         tokens = _set_session_context(new_key)
         try:
-            agent = _make_agent(new_sid, new_key, session_id=new_key)
+            widget_token = set_widget_render_available(
+                "widget.render" in branch_caps
+            )
+            try:
+                agent = _make_agent(new_sid, new_key, session_id=new_key)
+            finally:
+                reset_widget_render_available(widget_token)
         finally:
             _clear_session_context(tokens)
+        _state().sessions.setdefault(new_sid, {})["client_capabilities"] = branch_caps
         _init_session(
             new_sid, new_key, agent, list(history), cols=session.get("cols", 80)
         )
@@ -3401,6 +3699,61 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5027, str(e))
 
 
+# Default 25 MiB. Bigger files belong in a dedicated upload service, not
+# the JSON-RPC channel where every byte is base64.
+_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024
+
+
+@method("attachment.upload")
+def _(rid, params: dict) -> dict:
+    """Receive bytes from a remote client and persist them under
+    HERMES_HOME so the agent (which only reads from local disk) can
+    attach them like any other file. Mirrors ``image.attach`` but
+    accepts arbitrary content and raw bytes instead of a pre-existing
+    server path.
+    """
+    session, err = _sess(params, rid)
+    if err:
+        return err
+
+    filename = str(params.get("filename", "") or "").strip()
+    if not filename:
+        return _err(rid, 4001, "filename required")
+    # Reject anything that could escape the cache directory: separators,
+    # parent-dir traversal, NUL, leading dots that name the dir itself.
+    if any(c in filename for c in ("/", "\\", "\x00")) or ".." in filename or filename == ".":
+        return _err(rid, 4002, "filename must be a single basename")
+
+    raw = params.get("data", "")
+    if not isinstance(raw, str):
+        return _err(rid, 4003, "data must be a base64-encoded string")
+    try:
+        payload = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return _err(rid, 4003, "data must be base64-encoded")
+
+    if len(payload) > _ATTACHMENT_MAX_BYTES:
+        return _err(
+            rid,
+            4004,
+            f"size {len(payload)} exceeds {_ATTACHMENT_MAX_BYTES}-byte limit",
+        )
+
+    cache_dir = get_hermes_home() / "desktop_app_attachments"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / f"{uuid.uuid4().hex[:8]}_{filename}"
+    target.write_bytes(payload)
+
+    return _ok(
+        rid,
+        {
+            "path": str(target),
+            "filename": filename,
+            "size": len(payload),
+        },
+    )
+
+
 @method("input.detect_drop")
 def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
@@ -3494,16 +3847,295 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"task_id": task_id})
 
 
+@method("prompt.btw")
+def _(rid, params: dict) -> dict:
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    text, sid = params.get("text", ""), params.get("session_id", "")
+    if not text:
+        return _err(rid, 4012, "text required")
+    snapshot = list(session.get("history", []))
+
+    def run():
+        session_tokens = _set_session_context(session["session_key"])
+        try:
+            from run_agent import AIAgent
+
+            # Seed the reflective agent from the live session so provider /
+            # base URL / api_key / service_tier / ephemeral_system_prompt /
+            # request_overrides match the surrounding conversation. Cap
+            # iterations and disable tools — btw is a one-shot reflective
+            # call.
+            kwargs = _background_agent_kwargs(
+                session["agent"], f"btw_{uuid.uuid4().hex[:6]}"
+            )
+            kwargs["max_iterations"] = 8
+            kwargs["enabled_toolsets"] = []
+            result = AIAgent(**kwargs).run_conversation(
+                text, conversation_history=snapshot
+            )
+            _emit(
+                "btw.complete",
+                sid,
+                {
+                    "text": (
+                        result.get("final_response", str(result))
+                        if isinstance(result, dict)
+                        else str(result)
+                    )
+                },
+            )
+        except Exception as e:
+            _emit("btw.complete", sid, {"text": f"error: {e}"})
+        finally:
+            _clear_session_context(session_tokens)
+
+    threading.Thread(target=run, daemon=True).start()
+    return _ok(rid, {"status": "running"})
+
+
+# ── Methods: widget.api_call ─────────────────────────────────────────
+# Capabilities that round-trip to Hermes (require a server-side prompt.btw).
+# Cards declaring other capabilities (notes.save, storage.*, etc.) are
+# handled entirely by the Tauri broker and never reach this handler.
+_HERMES_BACKED_CAPABILITIES = {"hermes.ask"}
+
+
+@method("widget.api_call")
+def _(rid, params: dict) -> dict:
+    from tui_gateway.widget_constants import (
+        ERROR_CAP_NOT_DECLARED,
+        ERROR_UNKNOWN_CAPABILITY,
+        ERROR_UNKNOWN_CARD,
+    )
+
+    sid = params.get("session_id", "") or ""
+    card_id = params.get("card_id", "") or ""
+    correlation_id = params.get("correlation_id", "") or ""
+    capability = params.get("capability", "") or ""
+    call_args = params.get("args") or {}
+
+    state = _state()
+    sess = state.sessions.get(sid)
+    if sess is None:
+        return _err(rid, 4001, "session not found")
+    if capability not in _HERMES_BACKED_CAPABILITIES:
+        return _err(
+            rid,
+            ERROR_UNKNOWN_CAPABILITY,
+            f"unsupported widget.api_call capability: {capability!r}",
+        )
+
+    widget_reg = sess.get("widget_registry")
+    api_reg = sess.get("api_call_registry")
+    if widget_reg is None or api_reg is None:
+        return _err(rid, 4001, "session has no widget runtime")
+
+    entry = widget_reg.get(card_id)
+    if entry is None:
+        return _err(rid, ERROR_UNKNOWN_CARD, f"card not live: {card_id!r}")
+    if capability not in entry.capabilities:
+        return _err(
+            rid,
+            ERROR_CAP_NOT_DECLARED,
+            f"capability {capability!r} not declared by card {card_id!r}",
+        )
+
+    api_reg.register(
+        correlation_id=correlation_id,
+        card_id=card_id,
+        capability=capability,
+        # The worker stashes the live AIAgent on the entry once constructed;
+        # cancellation reads it back to call agent.interrupt().
+        agent_ref=None,
+    )
+
+    # Spawn the work in a background thread; the worker emits
+    # widget.api_response when it completes.
+    _spawn_widget_api_call_worker(
+        sid=sid,
+        session_key=sess.get("session_key", ""),
+        correlation_id=correlation_id,
+        card_id=card_id,
+        capability=capability,
+        call_args=call_args,
+        history_snapshot=list(sess.get("history") or []),
+    )
+
+    return _ok(rid, {"accepted": True, "correlation_id": correlation_id})
+
+
+def _spawn_widget_api_call_worker(
+    *,
+    sid,
+    session_key,
+    correlation_id,
+    card_id,
+    capability,
+    call_args,
+    history_snapshot,
+):
+    """Run the capability call as a prompt.btw and emit widget.api_response.
+
+    Defined as a module-level function (not a closure) so tests can
+    monkey-patch it.
+    """
+    from tui_gateway.widget_constants import (
+        ERROR_API_CALL_EXPIRED,
+        ERROR_RESPONSE_TOO_LARGE,
+        ERROR_UNKNOWN_CAPABILITY,
+        HERMES_ASK_RESPONSE_CAP_BYTES,
+    )
+
+    state = _state()
+
+    def run():
+        session_tokens = []
+        entry = None
+        try:
+            session_tokens = _set_session_context(session_key)
+            from run_agent import AIAgent
+
+            sess = state.sessions.get(sid) or {}
+            api_reg = sess.get("api_call_registry")
+            entry = api_reg.get(correlation_id) if api_reg is not None else None
+
+            if capability == "hermes.ask":
+                prompt = str(call_args.get("prompt", "") or "")
+                # Seed the widget-backed agent from the live session so the
+                # answer comes from the same provider / base URL / api_key /
+                # service_tier / overrides as the surrounding conversation.
+                parent_agent = sess.get("agent") if sess else None
+                btw_kwargs = _background_agent_kwargs(
+                    parent_agent, f"hermes_ask_{correlation_id}"
+                )
+                btw_kwargs["max_iterations"] = 8
+                btw_kwargs["enabled_toolsets"] = []
+                btw_agent = AIAgent(**btw_kwargs)
+                # Stash the live agent on the registry entry so a concurrent
+                # widget.api_cancel can call agent.interrupt() to abort.
+                if api_reg is not None and entry is not None:
+                    entry.agent_ref = btw_agent
+                result = btw_agent.run_conversation(
+                    prompt, conversation_history=history_snapshot
+                )
+                answer = (
+                    result.get("final_response", str(result))
+                    if isinstance(result, dict)
+                    else str(result)
+                )
+                payload_result = {"answer": answer}
+            else:
+                _emit_api_response_error(
+                    sid,
+                    correlation_id,
+                    card_id,
+                    ERROR_UNKNOWN_CAPABILITY,
+                    f"unsupported capability {capability!r} reached worker",
+                )
+                if api_reg is not None:
+                    api_reg.complete(correlation_id)
+                return
+
+            # Drop-on-arrival: if the correlation was registered at the
+            # start of this worker but is no longer active, it was cancelled
+            # mid-flight. Drop the response without emitting.
+            if (
+                api_reg is not None
+                and entry is not None
+                and api_reg.get(correlation_id) is None
+            ):
+                logging.getLogger(__name__).info(
+                    "[widget] dropping late response for cancelled correlation %s on card %s",
+                    correlation_id,
+                    card_id,
+                )
+                return
+
+            # Cap enforcement — measure the serialized result before emitting.
+            serialized = json.dumps(payload_result, ensure_ascii=False)
+            actual = len(serialized.encode("utf-8"))
+            if actual > HERMES_ASK_RESPONSE_CAP_BYTES:
+                _emit_api_response_error(
+                    sid,
+                    correlation_id,
+                    card_id,
+                    ERROR_RESPONSE_TOO_LARGE,
+                    f"widget.api_response payload exceeds 32 KiB cap "
+                    f"(actual {actual} bytes, cap {HERMES_ASK_RESPONSE_CAP_BYTES} bytes)",
+                )
+            else:
+                _emit(
+                    "widget.api_response",
+                    sid,
+                    {
+                        "correlation_id": correlation_id,
+                        "card_id": card_id,
+                        "result": payload_result,
+                    },
+                )
+
+            if api_reg is not None:
+                api_reg.complete(correlation_id)
+        except Exception as exc:
+            # If the correlation was registered at the start and is now
+            # gone, the exception is likely from interrupt(); drop silently.
+            late_sess = state.sessions.get(sid)
+            late_api_reg = (
+                late_sess.get("api_call_registry") if late_sess is not None else None
+            )
+            if (
+                late_api_reg is not None
+                and entry is not None
+                and late_api_reg.get(correlation_id) is None
+            ):
+                logging.getLogger(__name__).debug(
+                    "[widget] worker raised after cancel for %s: %s",
+                    correlation_id,
+                    exc,
+                )
+                return
+            _emit_api_response_error(
+                sid,
+                correlation_id,
+                card_id,
+                ERROR_API_CALL_EXPIRED,
+                f"widget.api_call worker error: {exc}",
+            )
+            if late_api_reg is not None:
+                late_api_reg.complete(correlation_id)
+        finally:
+            if session_tokens:
+                _clear_session_context(session_tokens)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _emit_api_response_error(
+    sid: str, correlation_id: str, card_id: str, code: int, message: str
+) -> None:
+    _emit(
+        "widget.api_response",
+        sid,
+        {
+            "correlation_id": correlation_id,
+            "card_id": card_id,
+            "error": {"code": code, "message": message},
+        },
+    )
+
+
 # ── Methods: respond ─────────────────────────────────────────────────
 
 
 def _respond(rid, params, key):
     r = params.get("request_id", "")
-    entry = _pending.get(r)
+    entry = _state().pending.get(r)
     if not entry:
         return _err(rid, 4009, f"no pending {key} request")
     _, ev = entry
-    _answers[r] = params.get(key, "")
+    _state().answers[r] = params.get(key, "")
     ev.set()
     return _ok(rid, {"status": "ok"})
 
@@ -3551,7 +4183,7 @@ def _(rid, params: dict) -> dict:
 @method("config.set")
 def _(rid, params: dict) -> dict:
     key, value = params.get("key", ""), params.get("value", "")
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
 
     if key == "model":
         try:
@@ -3922,6 +4554,29 @@ def _(rid, params: dict) -> dict:
     return _err(rid, 4002, f"unknown config key: {key}")
 
 
+@method("config.reveal_secret")
+def _(rid, params: dict) -> dict:
+    """Return the plaintext value of a single config key. Rate-limited
+    globally so an attacker can't bypass by cycling connections.
+    """
+    if not _reveal_check():
+        return _err(rid, 429, "too many reveal requests; try again shortly")
+
+    requested = params.get("key", "")
+    if not isinstance(requested, str) or not requested:
+        return _err(rid, 4001, "key required")
+
+    cfg = _load_cfg()
+    parts = requested.split(".")
+    cursor = cfg
+    for part in parts:
+        if isinstance(cursor, dict) and part in cursor:
+            cursor = cursor[part]
+        else:
+            return _err(rid, 4004, f"no such config key: {requested}")
+    return _ok(rid, {"key": requested, "value": cursor})
+
+
 @method("config.get")
 def _(rid, params: dict) -> dict:
     key = params.get("key", "")
@@ -3948,7 +4603,10 @@ def _(rid, params: dict) -> dict:
 
         return _ok(rid, {"home": str(_hermes_home), "display": display_hermes_home()})
     if key == "full":
-        return _ok(rid, {"config": _load_cfg()})
+        cfg = _load_cfg()
+        if _state().redact_secrets:
+            cfg = _redact_dict(cfg)
+        return _ok(rid, {"config": cfg})
     if key == "prompt":
         return _ok(rid, {"prompt": _load_cfg().get("custom_prompt", "")})
     if key == "skin":
@@ -4080,7 +4738,7 @@ def _(rid, params: dict) -> dict:
 
 @method("reload.mcp")
 def _(rid, params: dict) -> dict:
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
     try:
         # Gate: /reload-mcp invalidates the prompt cache for this session.
         # Respect the ``approvals.mcp_reload_confirm`` config toggle — if
@@ -4379,7 +5037,7 @@ def _(rid, params: dict) -> dict:
     resolved = _resolve_name(name)
     if resolved != name:
         name = resolved
-    session = _sessions.get(params.get("session_id", ""))
+    session = _state().sessions.get(params.get("session_id", ""))
 
     qcmds = _load_cfg().get("quick_commands", {})
     if name in qcmds:
@@ -5088,7 +5746,7 @@ def _(rid, params: dict) -> dict:
         from hermes_cli.model_switch import list_authenticated_providers
         from hermes_cli.models import CANONICAL_PROVIDERS, _PROVIDER_LABELS
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         agent = session.get("agent") if session else None
         cfg = _load_cfg()
         current_provider = getattr(agent, "provider", "") or ""
@@ -6144,7 +6802,7 @@ def _(rid, params: dict) -> dict:
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             set(getattr(session["agent"], "enabled_toolsets", []) or [])
             if session
@@ -6175,7 +6833,7 @@ def _(rid, params: dict) -> dict:
     try:
         from model_tools import get_toolset_for_tool, get_tool_definitions
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             getattr(session["agent"], "enabled_toolsets", None)
             if session
@@ -6248,7 +6906,7 @@ def _(rid, params: dict) -> dict:
         )
         save_config(cfg)
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         info = (
             _reset_session_agent(params.get("session_id", ""), session)
             if session
@@ -6284,7 +6942,7 @@ def _(rid, params: dict) -> dict:
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
-        session = _sessions.get(params.get("session_id", ""))
+        session = _state().sessions.get(params.get("session_id", ""))
         enabled = (
             set(getattr(session["agent"], "enabled_toolsets", []) or [])
             if session
@@ -6478,3 +7136,13 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5002, "command timed out (30s)")
     except Exception as e:
         return _err(rid, 5003, str(e))
+
+
+# Wire inbound widget.* event handlers into the dispatch path. Imported
+# at the bottom so the event_handler decorator and _event_handlers map
+# are already defined.
+from tui_gateway.widget_runtime import (  # noqa: E402
+    _register_inbound_event_handlers as _reg_widget_inbound,
+)
+
+_reg_widget_inbound()

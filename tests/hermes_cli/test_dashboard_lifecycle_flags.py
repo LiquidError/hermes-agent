@@ -158,6 +158,38 @@ class TestLifecycleFlagsTakePrecedence:
         assert called["start"] is False
 
 
+class TestBindRefusedHandling:
+    """``start_server`` raises ``BindRefused`` when the operator misconfigures
+    the bind (off-loopback without TLS / API key).  ``cmd_dashboard`` must
+    catch it and exit 1 with a clean stderr message — never let a Python
+    traceback through to the user."""
+
+    def test_bind_refused_exits_one_with_stderr_message(self, capsys):
+        from hermes_cli.web_server import BindRefused
+
+        def fake_start_server(**kw):
+            raise BindRefused("Refusing to start: binding to 0.0.0.0 requires TLS.")
+
+        fake_ws = MagicMock()
+        fake_ws.start_server = fake_start_server
+        fake_ws.BindRefused = BindRefused
+
+        # Skip the fastapi/uvicorn import check + the web build step so we
+        # actually reach the start_server call.
+        with patch.dict(sys.modules, {"hermes_cli.web_server": fake_ws}), \
+             patch("hermes_cli.main._build_web_ui", return_value=True), \
+             pytest.raises(SystemExit) as exc:
+            cmd_dashboard(_ns(host="0.0.0.0"))
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Refusing to start" in captured.err
+        # The clean message must NOT have leaked to stdout, and there should
+        # be no traceback artifacts.
+        assert "Traceback" not in captured.err
+        assert "Traceback" not in captured.out
+
+
 class TestArgparseWiring:
     """Confirm the flags are exposed via the real argparse tree so
     ``hermes dashboard --stop`` / ``--status`` actually parse."""

@@ -4333,6 +4333,16 @@ class GatewayRunner:
                 return None
             return QQAdapter(config)
 
+        elif platform == Platform.DESKTOP_APP:
+            from gateway.platforms.desktop_app import (
+                DesktopAppAdapter,
+                check_desktop_app_requirements,
+            )
+            if not check_desktop_app_requirements():
+                logger.warning("DesktopApp: aiohttp not installed")
+                return None
+            return DesktopAppAdapter(config)
+
         elif platform == Platform.YUANBAO:
             from gateway.platforms.yuanbao import YuanbaoAdapter, WEBSOCKETS_AVAILABLE
             if not WEBSOCKETS_AVAILABLE:
@@ -4341,6 +4351,7 @@ class GatewayRunner:
             return YuanbaoAdapter(config)
 
         return None
+
     def _is_user_authorized(self, source: SessionSource) -> bool:
         """
         Check if a user is authorized to use the bot.

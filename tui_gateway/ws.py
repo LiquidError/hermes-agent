@@ -164,7 +164,7 @@ async def handle_ws(ws: Any) -> None:
 
         # Detach the transport from any sessions it owned so later emits
         # fall back to stdio instead of crashing into a closed socket.
-        for _, sess in list(server._sessions.items()):
+        for sess in list(server._state().sessions.values()):
             if sess.get("transport") is transport:
                 sess["transport"] = server._stdio_transport
 

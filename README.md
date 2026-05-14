@@ -28,6 +28,17 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), [Open
 
 ---
 
+## About this fork
+
+This fork tracks `NousResearch/hermes-agent` and adds two things on top:
+
+- **`DesktopAppAdapter`** — a network-exposed `tui_gateway` that lets a desktop client speak the full TUI's RPC surface (62 methods, streaming, approvals, slash commands, voice, attachments). Bearer-token auth, multi-client isolation, secret redaction. See [plans/desktop-app-adapter.md](plans/desktop-app-adapter.md).
+- **Widget runtime** — a `widget.*` RPC namespace and six agent tools (`render_widget`, `widget_update`, `widget_message`, `widget_dispose`, `list_widget_examples`, `read_widget_example`) that let the agent render React/JSX cards onto a sandboxed canvas with a brokered capability surface. Wire spec: [plans/widget-render-spec.md](plans/widget-render-spec.md). Implementation design: [plans/widget-runtime-design.md](plans/widget-runtime-design.md).
+
+The companion desktop client lives in a separate repo. Everything below is the upstream README; the fork-specific docs live in `plans/`.
+
+---
+
 ## Quick Install
 
 ```bash

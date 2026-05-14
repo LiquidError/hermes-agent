@@ -5244,6 +5244,13 @@ def cmd_webhook(args):
     webhook_command(args)
 
 
+def cmd_desktop(args):
+    """DesktopAppAdapter client pairing."""
+    from hermes_cli.desktop_app import desktop_command
+
+    return desktop_command(args)
+
+
 def cmd_slack(args):
     """Slack integration helpers.
 
@@ -8413,16 +8420,20 @@ def cmd_dashboard(args):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
             sys.exit(1)
 
-    from hermes_cli.web_server import start_server
+    from hermes_cli.web_server import BindRefused, start_server
 
     embedded_chat = args.tui or os.environ.get("HERMES_DASHBOARD_TUI") == "1"
-    start_server(
-        host=args.host,
-        port=args.port,
-        open_browser=not args.no_open,
-        allow_public=getattr(args, "insecure", False),
-        embedded_chat=embedded_chat,
-    )
+    try:
+        start_server(
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_open,
+            allow_public=getattr(args, "insecure", False),
+            embedded_chat=embedded_chat,
+        )
+    except BindRefused as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_completion(args, parser=None):
@@ -9184,6 +9195,35 @@ def main():
     )
 
     webhook_parser.set_defaults(func=cmd_webhook)
+
+    # =========================================================================
+    # desktop command — pair/list/revoke clients for DesktopAppAdapter
+    # =========================================================================
+    desktop_parser = subparsers.add_parser(
+        "desktop",
+        help="Manage paired clients for the desktop chat adapter",
+        description=(
+            "Mint, list, and revoke bearer tokens for clients connecting "
+            "to DesktopAppAdapter. Tokens persist to "
+            "~/.hermes/desktop_app_tokens.json (only hashes are stored)."
+        ),
+    )
+    desktop_subparsers = desktop_parser.add_subparsers(dest="desktop_action")
+
+    dp_pair = desktop_subparsers.add_parser(
+        "pair", help="Mint a token for a new client; printed once, not recoverable"
+    )
+    dp_pair.add_argument("--client-name", dest="client_name", required=True,
+                         help="Friendly name (e.g. tony-laptop)")
+
+    desktop_subparsers.add_parser("list", aliases=["ls"], help="List paired client names")
+
+    dp_rm = desktop_subparsers.add_parser(
+        "revoke", aliases=["rm"], help="Remove a paired client by name"
+    )
+    dp_rm.add_argument("client_name", help="Client name to revoke")
+
+    desktop_parser.set_defaults(func=cmd_desktop)
 
     # =========================================================================
     # kanban command — multi-profile collaboration board

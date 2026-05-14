@@ -182,6 +182,17 @@ SKILLS_GUIDANCE = (
     "Skills that aren't maintained become liabilities."
 )
 
+# Widget runtime — lean addendum loaded once at process import. Conditionally
+# appended in run_agent._build_system_prompt when render_widget is in
+# valid_tool_names. The heavy content (canvasAPI types, example .tsx files)
+# stays out of the prompt; the agent fetches it on demand via the
+# read_widget_example tool.
+_WIDGET_PROMPT_PATH = Path(__file__).resolve().parent.parent / "assets" / "widget_prompts" / "addendum.md"
+try:
+    WIDGET_AUTHOR_GUIDANCE = _WIDGET_PROMPT_PATH.read_text(encoding="utf-8").strip()
+except FileNotFoundError:
+    WIDGET_AUTHOR_GUIDANCE = ""
+
 KANBAN_GUIDANCE = (
     "# Kanban task execution protocol\n"
     "You have been assigned ONE task from "
@@ -489,6 +500,16 @@ PLATFORM_HINTS = {
         "and emoji. You can send media files natively: include MEDIA:/absolute/path/to/file in "
         "your response. Images are sent as native photos, and other files arrive as downloadable "
         "documents."
+    ),
+    "desktop_app": (
+        "You are talking to your user through a desktop chat app — a native window on the "
+        "user's machine that speaks the same JSON-RPC dispatcher as the Hermes TUI. "
+        "Markdown is rendered fully (headings, bold, italic, lists, code blocks, tables, "
+        "links). Streaming deltas, tool-call timelines, approval prompts, voice in/out, "
+        "and image attachments are all first-class — the same UX surface as the TUI, with "
+        "richer rendering. Slash commands work via slash.exec; do not emit MEDIA:/path "
+        "tags here — the desktop client renders attachments through native pickers and "
+        "the agent's own tools, not via a delivery sidechannel."
     ),
     "yuanbao": (
         "You are on Yuanbao (腾讯元宝), a Chinese AI assistant platform. "

@@ -17,3 +17,24 @@ def all_assignees_spawnable(monkeypatch):
     """
     from hermes_cli import profiles
     monkeypatch.setattr(profiles, "profile_exists", lambda name: True)
+
+
+@pytest.fixture(autouse=True)
+def _reset_dashboard_state():
+    """Reset web_server module/app state after each test.
+
+    Task 5+'s start_server() sets app.state.bound_host, app.state.bound_port,
+    and web_server._TLS_CONTEXT at listen time. Tests that mock uvicorn.run
+    leave those values set, which then leak into later tests on the same
+    xdist worker — observable as path-traversal tests returning 400 instead
+    of 200/404, or /api/meta surfacing TLS info from a previous test's cert.
+    """
+    yield
+    try:
+        from hermes_cli import web_server
+        web_server.app.state.bound_host = None
+        web_server.app.state.bound_port = None
+        web_server.app.state.allow_insecure = False
+        web_server._TLS_CONTEXT = None
+    except Exception:
+        pass

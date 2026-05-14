@@ -60,6 +60,9 @@ _HERMES_CORE_TOOLS = [
     "send_message",
     # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
     "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+    # Canvas widget runtime (gated per-session on widget.render capability)
+    "render_widget", "widget_update", "widget_message", "widget_dispose",
+    "list_widget_examples", "read_widget_example",
     # Kanban multi-agent coordination — only in schema when the agent is
     # spawned as a kanban worker (HERMES_KANBAN_TASK env set), otherwise
     # zero schema footprint. Gated via check_fn in tools/kanban_tools.py.
@@ -211,6 +214,15 @@ TOOLSETS = {
         "description": "Home Assistant smart home control and monitoring",
         "tools": ["ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service"],
         "includes": []
+    },
+
+    "widget": {
+        "description": "Canvas widget runtime — render React/JSX cards on the Tauri client (gated on widget.render capability)",
+        "tools": [
+            "render_widget", "widget_update", "widget_message", "widget_dispose",
+            "list_widget_examples", "read_widget_example",
+        ],
+        "includes": [],
     },
 
     "kanban": {

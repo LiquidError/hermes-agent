@@ -22,6 +22,7 @@ tmp/
 temp_vision_images/
 hermes-*/*
 examples/
+!assets/widget_prompts/examples/
 tests/quick_test_dataset.jsonl
 tests/sample_dataset.jsonl
 run_datagen_kimik2-thinking.sh
@@ -42,6 +43,7 @@ __pycache__/
 hermes_agent.egg-info/
 wandb/
 testlogs
+.claude/
 
 # CLI config (may contain sensitive SSH paths)
 cli-config.yaml
@@ -69,4 +71,5 @@ mini-swe-agent/
 .nix-stamps/
 result
 website/static/api/skills-index.json
+uv.lock
 models-dev-upstream/

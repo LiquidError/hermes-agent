@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import dataclasses
 import hmac
 import importlib.util
 import json
@@ -50,6 +51,7 @@ from hermes_cli.config import (
 from gateway.status import get_running_pid, read_runtime_status
 
 try:
+    import uvicorn
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -77,6 +79,13 @@ _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 # In-browser Chat tab (/chat, /api/pty, …).  Off unless ``hermes dashboard --tui``
 # or HERMES_DASHBOARD_TUI=1.  Set from :func:`start_server`.
 _DASHBOARD_EMBEDDED_CHAT_ENABLED = False
+
+# Loaded by start_server() when ~/.hermes/tls/<host>.{crt,key} exists.
+# (Tailscale-issued certs have files like host.ts.net.crt — point HERMES_TLS_CERT
+# at the Tailscale path, or rename to <host>.crt to match the default.)
+# None when the dashboard is bound loopback without TLS.  Surfaced via /api/meta
+# so the desktop adapter can warn on imminent expiry.
+_TLS_CONTEXT = None  # type: hermes_cli.tls_loader.TLSContext | None
 
 # Simple rate limiter for the reveal endpoint
 _reveal_timestamps: List[float] = []
@@ -110,30 +119,110 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
 })
 
 
-def _has_valid_session_token(request: Request) -> bool:
-    """True if the request carries a valid dashboard session token.
+def _is_strict_off_loopback(app_state) -> bool:
+    """True when the dashboard should enforce strict off-loopback semantics.
 
-    The dedicated session header avoids collisions with reverse proxies that
-    already use ``Authorization`` (for example Caddy ``basic_auth``). We still
-    accept the legacy Bearer path for backward compatibility with older
-    dashboard bundles.
+    "Strict" means: every path requires a valid bearer (no SPA bootstrap
+    exemption, no `/docs` exemption), and the ephemeral session token is
+    rejected because the SPA HTML carrying it would leak on the network.
+
+    Returns False when ``HERMES_ALLOW_INSECURE_BIND=1`` (or ``--insecure``)
+    is set — the operator has explicitly opted into "treat this bind like
+    loopback even though it's network-facing", which makes the SPA flow
+    work and accepts the ephemeral token. Bind guard already warns loudly
+    on every request in that mode.
     """
-    session_header = request.headers.get(_SESSION_HEADER_NAME, "")
-    if session_header and hmac.compare_digest(
-        session_header.encode(),
-        _SESSION_TOKEN.encode(),
-    ):
+    bound_host = getattr(app_state, "bound_host", None) or "127.0.0.1"
+    if getattr(app_state, "allow_insecure", False):
+        return False
+    try:
+        from gateway.platforms.base import is_network_accessible
+        return is_network_accessible(bound_host)
+    except ImportError:
+        # Fail closed: when we can't classify the bind, gate everything.
         return True
 
-    auth = request.headers.get("authorization", "")
-    expected = f"Bearer {_SESSION_TOKEN}"
-    return hmac.compare_digest(auth.encode(), expected.encode())
+
+def _has_valid_session_token(request: Request) -> bool:
+    """True if the request carries a valid bearer token under the current bind policy.
+
+    Strict off-loopback bind: accept ``API_SERVER_KEY`` only. The ephemeral
+    token is rejected because it is injected into the locally-served SPA and
+    would leak via ``GET /``.
+
+    Loopback bind (or off-loopback with ``--insecure``/``HERMES_ALLOW_INSECURE_BIND=1``):
+    accept either the ephemeral ``_SESSION_TOKEN`` (used by the SPA) or
+    ``API_SERVER_KEY`` when set. The insecure-bind path is the operator's
+    explicit "trust this LAN" opt-in; it restores the pre-strict-mode SPA
+    flow on a network-facing bind.
+
+    DNS rebinding is defended upstream by ``host_header_middleware``; this
+    function enforces token-class policy only.
+    """
+    strict = _is_strict_off_loopback(request.app.state)
+
+    api_key = os.environ.get("API_SERVER_KEY", "")
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        presented = auth_header.split(" ", 1)[1]
+    else:
+        presented = ""
+    session_header = request.headers.get(_SESSION_HEADER_NAME, "")
+
+    # API_SERVER_KEY path — works under any bind classification.
+    if api_key and presented and hmac.compare_digest(presented.encode(), api_key.encode()):
+        return True
+
+    if strict:
+        # Strict off-loopback rejects every other token path. Including the
+        # SPA's ephemeral token (which would leak via the served HTML).
+        return False
+
+    # Lenient (loopback or --insecure): ephemeral session token in either header.
+    if session_header and hmac.compare_digest(session_header.encode(), _SESSION_TOKEN.encode()):
+        return True
+    if presented and hmac.compare_digest(presented.encode(), _SESSION_TOKEN.encode()):
+        return True
+    return False
 
 
 def _require_token(request: Request) -> None:
     """Validate the ephemeral session token.  Raises 401 on mismatch."""
     if not _has_valid_session_token(request):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _ws_request_token(websocket: "WebSocket") -> str:
+    """Extract the bearer token from a WebSocket upgrade request.
+
+    Accepts (in priority order): ``Authorization: Bearer`` header,
+    ``X-Hermes-Session-Token`` header, ``?token=`` query param. Returns
+    ``""`` when no candidate is presented.
+    """
+    auth = websocket.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1]
+    sess = websocket.headers.get(_SESSION_HEADER_NAME, "")
+    if sess:
+        return sess
+    return websocket.query_params.get("token", "") or ""
+
+
+def _ws_token_valid(websocket: "WebSocket", presented: str) -> bool:
+    """Bind-aware token check for WebSocket upgrades.
+
+    Mirrors :func:`_has_valid_session_token`, which takes a ``Request``:
+    accepts ``API_SERVER_KEY`` under any bind, falls back to the ephemeral
+    session token on loopback (or on off-loopback with ``--insecure``).
+    """
+    strict = _is_strict_off_loopback(websocket.app.state)
+    api_key = os.environ.get("API_SERVER_KEY", "")
+    if api_key and presented and hmac.compare_digest(presented.encode(), api_key.encode()):
+        return True
+    if strict:
+        return False
+    return bool(presented) and hmac.compare_digest(presented.encode(), _SESSION_TOKEN.encode())
 
 
 # Accepted Host header values for loopback binds. DNS rebinding attacks
@@ -191,6 +280,114 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
     return host_only == bound_lc
 
 
+# ---------------------------------------------------------------------------
+# Bind-config guard for off-loopback exposure.
+# Mirrors gateway/platforms/api_server.py:3082-3105 so the dashboard and
+# gateway refuse the same misconfigurations with the same wording.
+# ---------------------------------------------------------------------------
+
+class BindRefused(RuntimeError):
+    """Raised when the dashboard would bind in a misconfigured state."""
+
+
+@dataclasses.dataclass(frozen=True)
+class BindCheck:
+    """Result of a permitted bind. ``warnings`` are emitted by start_server."""
+
+    warnings: list[str]
+
+
+def _validate_bind_config(
+    *,
+    host: str,
+    has_tls: bool,
+    api_key: str,
+    allow_insecure: bool,
+) -> BindCheck:
+    """Decide whether the dashboard may bind ``host`` with the given posture.
+
+    Loopback binds are always permitted (current behaviour, unchanged).
+    Non-loopback binds require TLS + a usable ``API_SERVER_KEY`` unless
+    ``HERMES_ALLOW_INSECURE_BIND=1`` (or ``--insecure``) is set.
+    """
+    from gateway.platforms.base import is_network_accessible
+    from hermes_cli.auth import has_usable_secret
+
+    warnings: list[str] = []
+    if not is_network_accessible(host):
+        return BindCheck(warnings=warnings)
+
+    if allow_insecure:
+        warnings.append(
+            f"Dashboard binding to {host} with HERMES_ALLOW_INSECURE_BIND=1 — "
+            "no TLS, no auth. Set API_SERVER_KEY and provision a cert."
+        )
+        return BindCheck(warnings=warnings)
+
+    if not has_tls:
+        raise BindRefused(
+            f"Refusing to start: binding to {host} requires TLS. "
+            f"Provision ~/.hermes/tls/<host>.ts.net.{{crt,key}} via `tailscale cert` "
+            "or set HERMES_ALLOW_INSECURE_BIND=1."
+        )
+    if not api_key:
+        raise BindRefused(
+            f"Refusing to start: binding to {host} requires API_SERVER_KEY. "
+            "Set API_SERVER_KEY (e.g. `openssl rand -hex 32`) or use the default 127.0.0.1."
+        )
+    if not has_usable_secret(api_key, min_length=8):
+        raise BindRefused(
+            f"Refusing to start: API_SERVER_KEY is set to a placeholder value. "
+            f"Generate a real secret (e.g. `openssl rand -hex 32`) and set API_SERVER_KEY "
+            f"before exposing the dashboard on {host}."
+        )
+    return BindCheck(warnings=warnings)
+
+
+def _resolve_tls_paths(host: str) -> tuple[Path | None, Path | None]:
+    """Resolve the cert/key paths for the dashboard's TLS termination.
+
+    The bind interface (``host``, e.g. ``0.0.0.0``) is rarely the right
+    filename root — Tailscale issues certs against the node hostname
+    (``myhost.ts.net``), not the bind address. Resolution priority:
+
+    1. ``HERMES_TLS_CERT`` + ``HERMES_TLS_KEY`` env vars (explicit override).
+       Always honored, regardless of bind.
+    2. ``HERMES_TLS_HOST`` env var → ``tls/<HERMES_TLS_HOST>.{crt,key}``.
+       Always honored, regardless of bind.
+    3. Single glob match: ``tls/*.ts.net.{crt,key}``. **Off-loopback only** —
+       loopback binds stay plaintext for zero-config local UX, even if cert
+       files are sitting on disk for the gateway / off-loopback use.
+    4. ``(None, None)`` — caller treats as "no TLS available".
+    """
+    cert_env = os.environ.get("HERMES_TLS_CERT")
+    key_env = os.environ.get("HERMES_TLS_KEY")
+    if cert_env and key_env:
+        return Path(cert_env), Path(key_env)
+
+    tls_dir = get_hermes_home() / "tls"
+
+    tls_host = os.environ.get("HERMES_TLS_HOST", "").strip()
+    if tls_host:
+        return tls_dir / f"{tls_host}.crt", tls_dir / f"{tls_host}.key"
+
+    try:
+        from gateway.platforms.base import is_network_accessible
+        is_off_loopback = is_network_accessible(host)
+    except ImportError:
+        is_off_loopback = False
+
+    if is_off_loopback and tls_dir.is_dir():
+        certs = sorted(tls_dir.glob("*.ts.net.crt"))
+        if len(certs) == 1:
+            cert = certs[0]
+            key = cert.with_suffix(".key")
+            if key.is_file():
+                return cert, key
+
+    return None, None
+
+
 @app.middleware("http")
 async def host_header_middleware(request: Request, call_next):
     """Reject requests whose Host header doesn't match the bound interface.
@@ -223,14 +420,57 @@ async def host_header_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Require the session token on all /api/ routes except the public list."""
+    """Bearer-token gate for dashboard routes.
+
+    Loopback bind — current behaviour preserved: ``/api/*`` requires a
+    valid bearer except for the documented ``_PUBLIC_API_PATHS`` exemption
+    (status, config schema, model info, plugin list, etc.) which exists
+    so the SPA can bootstrap before reading the injected ephemeral token.
+    Non-API routes (``/``, ``/docs``, static assets) are unauthenticated
+    on loopback because the SPA needs them to render in the browser.
+
+    Off-loopback bind — strict mode: **every** path requires a valid
+    bearer. The ``/api/*`` public list is dropped (config schema / plugin
+    list / rescan should not be reachable on the network), and the rest
+    of the surface (``/`` SPA HTML, ``/docs`` OpenAPI, ``/openapi.json``,
+    every static asset) is gated too. Reasoning:
+
+    - ``/docs`` and ``/openapi.json`` enumerate every endpoint and its
+      request/response schema — a reconnaissance leak.
+    - ``/`` returns the SPA HTML which embeds the ephemeral session token;
+      the token itself is useless off-loopback (the auth middleware
+      rejects it) but the format and the bootstrap pattern still leak.
+    - Static assets are not sensitive individually, but serving them
+      unauthenticated reveals that a Hermes dashboard is running, helps
+      attackers fingerprint the version, and bloats the unauthenticated
+      attack surface for no benefit.
+
+    The intended off-loopback consumer is the Tauri ``DashboardAdapter``
+    which always presents a bearer. Browser-SPA-over-network is not a
+    supported use case (use loopback, or tunnel loopback over Tailscale).
+    """
+    strict = _is_strict_off_loopback(request.app.state)
     path = request.url.path
-    if path.startswith("/api/") and path not in _PUBLIC_API_PATHS and not path.startswith("/api/plugins/"):
+
+    if strict:
+        # Strict off-loopback: every path requires a valid bearer.
         if not _has_valid_session_token(request):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Unauthorized"},
             )
+    else:
+        # Lenient (loopback, or off-loopback with --insecure):
+        # only /api/* is gated, with the public-list exemption for SPA
+        # bootstrap. Everything else (SPA HTML, static, /docs) remains
+        # unauthenticated. The --insecure path inherits this lenient
+        # mode after the operator's explicit "trust this LAN" opt-in.
+        if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
+            if not _has_valid_session_token(request):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Unauthorized"},
+                )
     return await call_next(request)
 
 
@@ -520,6 +760,31 @@ def _probe_gateway_health() -> tuple[bool, dict | None]:
     return False, None
 
 
+# TTL-cached wrapper used by /api/meta.  The capability probe is called once
+# per Tauri-connect, so a short TTL is plenty to coalesce concurrent probes
+# from multiple clients without stalling the FastAPI event loop.
+_GATEWAY_PROBE_CACHE: tuple[float, tuple[bool, dict | None]] | None = None
+_GATEWAY_PROBE_TTL_SECONDS = 10.0
+
+
+async def _cached_gateway_health() -> tuple[bool, dict | None]:
+    """TTL-cached, executor-wrapped variant of :func:`_probe_gateway_health`.
+
+    /api/status keeps its own per-request behaviour; this exists so the
+    capability-probe handler doesn't block the event loop on a 3-6s urlopen.
+    """
+    global _GATEWAY_PROBE_CACHE
+    now = time.monotonic()
+    if _GATEWAY_PROBE_CACHE is not None:
+        ts, value = _GATEWAY_PROBE_CACHE
+        if now - ts < _GATEWAY_PROBE_TTL_SECONDS:
+            return value
+    loop = asyncio.get_event_loop()
+    value = await loop.run_in_executor(None, _probe_gateway_health)
+    _GATEWAY_PROBE_CACHE = (now, value)
+    return value
+
+
 @app.get("/api/status")
 async def get_status():
     current_ver, latest_ver = check_config_version()
@@ -624,6 +889,81 @@ async def get_status():
         "gateway_updated_at": gateway_updated_at,
         "active_sessions": active_sessions,
     }
+
+
+@app.get("/api/meta")
+async def get_meta(request: Request) -> dict:
+    """Capability probe consumed by the desktop adapter on connect.
+
+    Shape is documented in ``plans/dashboard-fork-spec.md`` §5.  Auth-gated:
+    returns the structure of the server (endpoints, plugins, profiles, TLS
+    state), distinct from ``/api/status`` which is a public liveness probe.
+    """
+    _require_token(request)
+
+    endpoints = sorted({
+        path
+        for route in app.routes
+        for path in [getattr(route, "path", "") or ""]
+        if path.startswith("/api/") and not path.startswith("/api/plugins/")
+    })
+
+    # Local PID check first (same-host install) — _cached_gateway_health()
+    # returns False when GATEWAY_HEALTH_URL is unset, which is the default
+    # config and would otherwise mark a running local gateway as unavailable.
+    gateway_running = get_running_pid() is not None
+    if not gateway_running and _GATEWAY_HEALTH_URL:
+        gw_alive, _gw_body = await _cached_gateway_health()
+        gateway_running = bool(gw_alive)
+    gw_url = _GATEWAY_HEALTH_URL or None
+
+    plugins: List[Dict[str, Any]] = []
+    try:
+        config = load_config()
+        hidden = cfg_get(config, "dashboard", "hidden_plugins", default=[]) or []
+        for p in _get_dashboard_plugins():
+            name = p.get("name")
+            if not name:
+                continue
+            plugins.append({
+                "name": name,
+                "enabled": name not in hidden,
+                "prefix": f"/api/plugins/{name}",
+            })
+    except Exception:
+        _log.exception("/api/meta: plugin discovery failed; returning empty list")
+        plugins = []
+
+    agent_profiles: List[str] = []
+    active_profile: str | None = None
+    try:
+        from hermes_cli import profiles as profiles_mod
+        agent_profiles = [
+            _profile_attr(p, "name", "") for p in profiles_mod.list_profiles()
+        ]
+        agent_profiles = [n for n in agent_profiles if n]
+        active_profile = profiles_mod.get_active_profile_name()
+    except Exception:
+        _log.exception("/api/meta: profile listing failed; returning empty list")
+
+    body: Dict[str, Any] = {
+        "hermes_version": __version__,
+        "services": {
+            "gateway": {"available": gateway_running, "url": gw_url},
+            "dashboard": {"available": True, "endpoints": endpoints},
+        },
+        "plugins": plugins,
+        "agent_profiles": agent_profiles,
+        "active_profile": active_profile,
+    }
+
+    if _TLS_CONTEXT is not None:
+        body["tls"] = {
+            "host": _TLS_CONTEXT.cert_path.stem,
+            "not_after": _TLS_CONTEXT.not_after.isoformat(),
+            "expires_soon": _TLS_CONTEXT.expires_soon,
+        }
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -2998,9 +3338,8 @@ async def pty_ws(ws: WebSocket) -> None:
         return
 
     # --- auth + loopback check (before accept so we can close cleanly) ---
-    token = ws.query_params.get("token", "")
-    expected = _SESSION_TOKEN
-    if not hmac.compare_digest(token.encode(), expected.encode()):
+    presented = _ws_request_token(ws)
+    if not _ws_token_valid(ws, presented):
         await ws.close(code=4401)
         return
 
@@ -3106,8 +3445,8 @@ async def gateway_ws(ws: WebSocket) -> None:
         await ws.close(code=4403)
         return
 
-    token = ws.query_params.get("token", "")
-    if not hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode()):
+    presented = _ws_request_token(ws)
+    if not _ws_token_valid(ws, presented):
         await ws.close(code=4401)
         return
 
@@ -3138,8 +3477,8 @@ async def pub_ws(ws: WebSocket) -> None:
         await ws.close(code=4403)
         return
 
-    token = ws.query_params.get("token", "")
-    if not hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode()):
+    presented = _ws_request_token(ws)
+    if not _ws_token_valid(ws, presented):
         await ws.close(code=4401)
         return
 
@@ -3167,8 +3506,8 @@ async def events_ws(ws: WebSocket) -> None:
         await ws.close(code=4403)
         return
 
-    token = ws.query_params.get("token", "")
-    if not hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode()):
+    presented = _ws_request_token(ws)
+    if not _ws_token_valid(ws, presented):
         await ws.close(code=4401)
         return
 
@@ -4024,23 +4363,54 @@ def start_server(
     embedded_chat: bool = False,
 ):
     """Start the web UI server."""
-    import uvicorn
-
     global _DASHBOARD_EMBEDDED_CHAT_ENABLED
     _DASHBOARD_EMBEDDED_CHAT_ENABLED = embedded_chat
 
-    _LOCALHOST = ("127.0.0.1", "localhost", "::1")
-    if host not in _LOCALHOST and not allow_public:
-        raise SystemExit(
-            f"Refusing to bind to {host} — the dashboard exposes API keys "
-            f"and config without robust authentication.\n"
-            f"Use --insecure to override (NOT recommended on untrusted networks)."
-        )
-    if host not in _LOCALHOST:
-        _log.warning(
-            "Binding to %s with --insecure — the dashboard has no robust "
-            "authentication. Only use on trusted networks.", host,
-        )
+    # --insecure and HERMES_ALLOW_INSECURE_BIND share the same local flag.
+    # We do NOT mutate os.environ — that leaks to subprocesses and in-process
+    # plugins, and the bind guard reads the parameter directly.
+    allow_insecure = allow_public or os.environ.get("HERMES_ALLOW_INSECURE_BIND", "") == "1"
+
+    # --- Bind guard ----------------------------------------------------
+    # When --insecure is set, skip TLS resolution entirely. The flag means
+    # "plaintext network bind, treat like loopback" — auto-discovering a
+    # cert from ~/.hermes/tls/ would silently flip the bind to HTTPS while
+    # the operator explicitly asked for plaintext.
+    if allow_insecure:
+        cert_path, key_path = None, None
+    else:
+        cert_path, key_path = _resolve_tls_paths(host)
+    has_tls = (
+        cert_path is not None
+        and key_path is not None
+        and cert_path.is_file()
+        and key_path.is_file()
+    )
+    api_key = os.environ.get("API_SERVER_KEY", "")
+
+    check = _validate_bind_config(
+        host=host, has_tls=has_tls, api_key=api_key, allow_insecure=allow_insecure,
+    )
+    for w in check.warnings:
+        _log.warning(w)
+
+    global _TLS_CONTEXT
+    if has_tls:
+        from hermes_cli.tls_loader import expiry_warning, load
+        try:
+            _TLS_CONTEXT = load(cert_path, key_path)
+        except (FileNotFoundError, OSError) as e:
+            # Fail closed: _validate_bind_config permitted this bind on the
+            # promise of TLS. Silently downgrading to plaintext on a network
+            # interface would leak the bearer in cleartext.
+            raise BindRefused(
+                f"Refusing to start: failed to load TLS material for {host}: {e}"
+            ) from e
+        warn = expiry_warning(_TLS_CONTEXT)
+        if warn:
+            _log.warning(warn)
+    else:
+        _TLS_CONTEXT = None
 
     # Record the bound host so host_header_middleware can validate incoming
     # Host headers against it. Defends against DNS rebinding (GHSA-ppp5-vxwm-4cf7).
@@ -4048,15 +4418,27 @@ def start_server(
     # PTY child uses to publish events to the dashboard sidebar.
     app.state.bound_host = host
     app.state.bound_port = port
+    app.state.allow_insecure = allow_insecure
+
+    scheme = "https" if _TLS_CONTEXT is not None else "http"
 
     if open_browser:
         import webbrowser
 
         def _open():
             time.sleep(1.0)
-            webbrowser.open(f"http://{host}:{port}")
+            webbrowser.open(f"{scheme}://{host}:{port}")
 
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"  Hermes Web UI → http://{host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    print(f"  Hermes Web UI → {scheme}://{host}:{port}")
+    ssl_keyfile = str(_TLS_CONTEXT.key_path) if _TLS_CONTEXT is not None else None
+    ssl_certfile = str(_TLS_CONTEXT.cert_path) if _TLS_CONTEXT is not None else None
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        ssl_keyfile=ssl_keyfile,
+        ssl_certfile=ssl_certfile,
+    )
