@@ -46,6 +46,15 @@ def main() -> None:
 
     uvicorn.run = _tls  # start_server resolves uvicorn.run at call time
 
+    # Register DashboardAuthProvider plugins (basic, nous, …) before the gate
+    # check — `hermes dashboard` does this; the bare start_server() does not.
+    try:
+        from hermes_cli.plugins import discover_plugins
+
+        discover_plugins()
+    except Exception as exc:
+        print(f"warning: plugin discovery failed: {exc}", file=sys.stderr)
+
     from hermes_cli.web_server import start_server
 
     start_server(host=args.host, port=args.port, open_browser=False, allow_public=args.insecure)
