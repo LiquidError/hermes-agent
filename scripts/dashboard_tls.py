@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Serve `hermes dashboard` over HTTPS without modifying core.
 
-Wraps uvicorn.run to add ssl_certfile/ssl_keyfile, then calls upstream
-start_server() unchanged. Run instead of `hermes dashboard`.
+Patches uvicorn.run to add ssl_certfile/ssl_keyfile, then runs the real
+`hermes dashboard` CLI path (full startup: profile, .env, auth-provider
+discovery). Run this instead of `hermes dashboard`.
 
   python scripts/dashboard_tls.py --host <host> --port 9119 --cert <host>.crt --key <host>.key
 
-Bind to the hostname the cert is for (or 0.0.0.0). A non-loopback bind engages
-the auth gate; keep dashboard.basic_auth configured, do not pass --insecure.
+A non-loopback bind engages the auth gate; keep dashboard.basic_auth configured,
+do not pass --insecure.
 """
 
 from __future__ import annotations
@@ -46,18 +47,16 @@ def main() -> None:
 
     uvicorn.run = _tls  # start_server resolves uvicorn.run at call time
 
-    # Register DashboardAuthProvider plugins (basic, nous, …) before the gate
-    # check — `hermes dashboard` does this; the bare start_server() does not.
-    try:
-        from hermes_cli.plugins import discover_plugins
+    # Run the real `hermes dashboard` so its full startup (profile resolution,
+    # .env load, auth-provider discovery) happens. Set argv before importing
+    # main — its module-level init reads it.
+    sys.argv = ["hermes", "dashboard", "--no-open", "--host", args.host, "--port", str(args.port)]
+    if args.insecure:
+        sys.argv.append("--insecure")
 
-        discover_plugins()
-    except Exception as exc:
-        print(f"warning: plugin discovery failed: {exc}", file=sys.stderr)
+    from hermes_cli.main import main as hermes_main
 
-    from hermes_cli.web_server import start_server
-
-    start_server(host=args.host, port=args.port, open_browser=False, allow_public=args.insecure)
+    hermes_main()
 
 
 if __name__ == "__main__":
