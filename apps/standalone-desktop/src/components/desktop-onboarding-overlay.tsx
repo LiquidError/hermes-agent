@@ -197,6 +197,16 @@ export function DesktopOnboardingOverlay({ enabled, onCompleted, requestGateway 
     return null
   }
 
+  // Remote-only client: this overlay is the model-provider picker, which is only
+  // meaningful once we're connected to a backend. Before that — still connecting,
+  // or no remote configured yet — stay out of the way so the gateway-connecting
+  // spinner and the remote-setup dialog (BootFailureOverlay → "Set up remote
+  // gateway") own the screen instead of a dead "Starting Hermes…" panel. Manual
+  // mode (opening the picker from a connected app) still bypasses this.
+  if (!enabled && !onboarding.manual) {
+    return null
+  }
+
   const { flow } = onboarding
   const rawReason = onboarding.reason?.trim() || null
   const reason = rawReason && !isProviderSetupErrorMessage(rawReason) ? rawReason : null

@@ -50,10 +50,13 @@ export interface Translations {
       remoteTitle: string
       remoteDescription: string
       retry: string
-      repairInstall: string
-      useLocalGateway: string
+      setUpRemoteGateway: string
+      remoteGatewaySettings: string
       openLogs: string
-      repairHint: string
+      setupTitle: string
+      setupDescription: string
+      setupHint: string
+      genericHint: string
       remoteSignInHint: string
       hideRecentLogs: string
       showRecentLogs: string

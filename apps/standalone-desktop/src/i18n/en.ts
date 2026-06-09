@@ -42,11 +42,16 @@ export const en: Translations = {
       remoteDescription:
         'Your remote gateway session has expired. Sign in again to reconnect. Nothing here deletes your chats or settings.',
       retry: 'Retry',
-      repairInstall: 'Repair install',
-      useLocalGateway: 'Use local gateway',
+      setUpRemoteGateway: 'Set up remote gateway',
+      remoteGatewaySettings: 'Remote gateway settings',
       openLogs: 'Open logs',
-      repairHint: 'Repair re-runs the installer and can take a few minutes on a fresh machine.',
-      remoteSignInHint: 'Opens the gateway login window. Use local gateway to switch to the bundled backend instead.',
+      setupTitle: 'Connect to your Hermes backend',
+      setupDescription:
+        'This app runs no agent of its own — it drives a Hermes dashboard running on another machine. Point it at your backend to get started.',
+      setupHint: 'You only need to do this once. The URL is your dashboard, e.g. http://your-host:9119.',
+      genericHint:
+        'Make sure the dashboard is running and reachable, then retry — or update its URL in the gateway settings.',
+      remoteSignInHint: 'Opens the gateway login window to re-establish your session.',
       hideRecentLogs: 'Hide recent logs',
       showRecentLogs: 'Show recent logs',
       signedInTitle: 'Signed in',
