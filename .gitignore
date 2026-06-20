@@ -70,6 +70,11 @@ apps/desktop/dist/
 apps/desktop/release/
 apps/desktop/*.tsbuildinfo
 
+apps/standalone-desktop/build/
+apps/standalone-desktop/dist/
+apps/standalone-desktop/release/
+apps/standalone-desktop/*.tsbuildinfo
+
 # Web UI assets — synced from @nous-research/ui at build time via
 # `npm run sync-assets` (see web/package.json).
 web/public/fonts/
