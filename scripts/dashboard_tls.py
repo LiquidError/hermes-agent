@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """Serve `hermes dashboard` over HTTPS without modifying core.
 
-Patches uvicorn.run to add ssl_certfile/ssl_keyfile, then runs the real
-`hermes dashboard` CLI path (full startup: profile, .env, auth-provider
-discovery). Run this instead of `hermes dashboard`.
+Injects ssl_certfile/ssl_keyfile into uvicorn, then runs the real `hermes
+dashboard` CLI path (full startup: profile, .env, auth-provider discovery).
+Run this instead of `hermes dashboard`.
 
   python scripts/dashboard_tls.py --host <host> --port 9119 --cert <host>.crt --key <host>.key
 
 A non-loopback bind engages the auth gate; keep dashboard.basic_auth configured,
 do not pass --insecure.
+
+NOTE: core's web_server.start_server() starts uvicorn via `uvicorn.Config(...)` +
+`uvicorn.Server(config)` (NOT `uvicorn.run()`), so the SSL kwargs MUST be injected
+at the Config layer — patching `uvicorn.run` alone is a silent no-op and the
+dashboard stays plain HTTP. We patch Config (the one that matters) and also run
+(for any back-compat code path). The `Hermes Web UI → http://…` banner is
+hardcoded in core and stays http:// even with TLS on — it is NOT an indicator;
+verify with `curl https://<host>:<port>/api/status`.
 """
 
 from __future__ import annotations
@@ -37,15 +45,33 @@ def main() -> None:
 
     import uvicorn
 
-    _run = uvicorn.run
-
-    def _tls(app, **kw):
+    def _with_tls(kw):
         kw["ssl_certfile"] = cert
         kw["ssl_keyfile"] = key
-        kw["proxy_headers"] = False  # direct terminator, not behind a proxy
-        return _run(app, **kw)
+        # We are the TLS terminator facing the client directly (no reverse
+        # proxy), so the request scheme is natively https and X-Forwarded-*
+        # must not be trusted — overrides core's proxy_headers choice.
+        kw["proxy_headers"] = False
+        return kw
 
-    uvicorn.run = _tls  # start_server resolves uvicorn.run at call time
+    # Primary: core builds the server with uvicorn.Config(app, ...) +
+    # uvicorn.Server(config). Inject SSL into Config so the socket actually
+    # terminates TLS. web_server uses `uvicorn.Config` attribute access, so
+    # patching the module attribute takes regardless of import timing.
+    _Config = uvicorn.Config
+
+    def _tls_config(*args, **kw):
+        return _Config(*args, **_with_tls(kw))
+
+    uvicorn.Config = _tls_config
+
+    # Back-compat: also cover any path that still calls uvicorn.run(app, ...).
+    _run = uvicorn.run
+
+    def _tls_run(app, **kw):
+        return _run(app, **_with_tls(kw))
+
+    uvicorn.run = _tls_run
 
     # Run the real `hermes dashboard` so its full startup (profile resolution,
     # .env load, auth-provider discovery) happens. Set argv before importing

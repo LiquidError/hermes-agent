@@ -195,7 +195,16 @@ diff that upstream code triggers under our config — run it, then re-`type-chec
 6. **i18n is type-checked.** Extra keys in a translation file that aren't in `types.ts` fail
    `tsc`. New language files from upstream (ja, zh-hant, …) ship local-backend keys — strip
    them. Missing keys are fine (the catalog type is all-optional).
-7. **`npm run test:ui` (vitest) noise is pre-existing, not your merge.** Two standing issues,
+7. **`scripts/dashboard_tls.py` rides a core internal — re-check it each release.**
+   The HTTPS wrapper injects `ssl_certfile`/`ssl_keyfile` by monkeypatching how core
+   starts uvicorn. Core uses `uvicorn.Config(...)` + `uvicorn.Server(config)` (see
+   `hermes_cli/web_server.py:start_server`), so SSL must be injected at the **Config**
+   layer; patching `uvicorn.run` alone is a **silent no-op** → dashboard stays plain HTTP →
+   client gets `net::ERR_SSL_PROTOCOL_ERROR` and the server logs `Invalid HTTP request
+   received`. If a release changes the serve mechanism, update the patch target. The
+   `Hermes Web UI → http://…` banner is hardcoded in core and is NOT a TLS indicator —
+   verify with `curl https://<host>:<port>/api/status`.
+8. **`npm run test:ui` (vitest) noise is pre-existing, not your merge.** Two standing issues,
    independent of any port: (a) jsdom `window.localStorage.* is not a function` on this setup;
    (b) vitest scans `electron/*.test.cjs` (node:test, not vitest → "No test suite found" /
    "describe is not defined") and gitignored `build/native-deps/**`, because `vite.config.ts`
