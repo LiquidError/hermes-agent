@@ -3200,6 +3200,40 @@ function installMediaPermissions() {
   })
 }
 
+// Dev-only: let `npm run dev` reach a remote gateway over its WebSocket.
+//
+// The dashboard's DNS-rebinding guard (web_server.py:_ws_host_origin_reason)
+// refuses a WS upgrade whose Origin host != the bound host, returning HTTP 403
+// (surfaced as "Could not connect to Hermes gateway"). In dev the renderer is
+// served from the Vite dev server (http://127.0.0.1:<port>), so its WS Origin
+// can never match a remote gateway host. Packaged builds load from file:// — a
+// non-web origin the guard exempts — so this only bites in dev.
+//
+// Rewrite the outgoing WS upgrade's Origin to the target's own host-origin so
+// the guard accepts it. This is safe for a native shell: DNS-rebinding is a
+// browser threat model, and the single-use ws-ticket in the URL is the real
+// auth boundary. Dev-gated so packaged behaviour is byte-for-byte unchanged.
+function installDevGatewayWsOriginRewrite() {
+  if (!DEV_SERVER) {
+    return
+  }
+
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['ws://*/*', 'wss://*/*'] },
+    (details, callback) => {
+      try {
+        const target = new URL(details.url)
+        const scheme = target.protocol === 'wss:' ? 'https:' : 'http:'
+        callback({
+          requestHeaders: { ...details.requestHeaders, Origin: `${scheme}//${target.host}` }
+        })
+      } catch {
+        callback({ requestHeaders: details.requestHeaders })
+      }
+    }
+  )
+}
+
 // ---------------------------------------------------------------------------
 // OAuth remote-gateway auth.
 //
@@ -5770,6 +5804,7 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
   }
   installMediaPermissions()
+  installDevGatewayWsOriginRewrite()
   registerMediaProtocol()
   registerDeepLinkProtocol()
   ensureWslWindowsFonts()
